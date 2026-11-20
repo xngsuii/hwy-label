@@ -38,7 +38,7 @@ export function drawIcon(ctx, name, x, y, cell, color) {
   const g = ICONS[name];
   if (!g) return;
   ctx.fillStyle = color;
-  const c = Math.max(1, cell);
+  const c = cell > 0 ? cell : 1; // 1px보다 작은 칸도 허용 (큰 이미지를 작은 칸에 맞출 때)
   g.forEach((row, j) => {
     for (let i = 0; i < row.length; i++) {
       if (row[i] === 'X') ctx.fillRect(Math.round(x + i * c), Math.round(y + j * c), Math.ceil(c), Math.ceil(c));

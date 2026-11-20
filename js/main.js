@@ -6,6 +6,7 @@ import { ICON_GROUPS, iconSvg, iconSize, setCustomIcons } from './pixel.js';
 import { BOARD_SIZES, BOARD_PPM, boardDims, autoLayout, scatterLayout, syncBoard, renderBoard } from './board.js';
 import { loadImageFile, toBitmap, rowsToCanvas } from './bitmap.js';
 import { idb } from './store.js';
+import { covered, hasMarks, toggleMark, toggleAll, editText, LINE_SIZES } from './rich.js';
 
 // ---------------- hooks ----------------
 function useStore() {
@@ -130,6 +131,7 @@ const UI_ICONS = {
   underline: ['XX...XX', 'XX...XX', 'XX...XX', 'XX...XX', '.XXXXX.', '.......', 'XXXXXXX'],
   strike:    ['.XXXXX.', 'XX.....', '.XXX...', 'XXXXXXX', '....XX.', 'X...XX.', '.XXXX..'],
   outline:   ['..XXX..', '.X...X.', 'X..X..X', 'X.X.X.X', 'X.XXX.X', 'X.X.X.X', 'XXX.XXX'],
+  hl:        ['XXXXXXX', 'XXX.XXX', 'XX.X.XX', 'XX.X.XX', 'XX...XX', 'XX.X.XX', 'XXXXXXX'],
   al_left:   ['XXXXXXX', '.......', 'XXXX...', '.......', 'XXXXXXX', '.......', 'XXXX...'],
   al_center: ['XXXXXXX', '.......', '.XXXXX.', '.......', 'XXXXXXX', '.......', '.XXXXX.'],
   al_right:  ['XXXXXXX', '.......', '...XXXX', '.......', 'XXXXXXX', '.......', '...XXXX'],
@@ -183,12 +185,13 @@ function Preview({ s, fv }) {
         <div class="ruler"></div>
       </div>
       <div class="put">
-        <button class="btn" onClick=${() => store.set(st => ({ ...st, editingId: null, label: { ...defaultLabel(), tapeColor: st.label.tapeColor, inkColor: st.label.inkColor, fontId: st.label.fontId } }))}>↺ 새로</button>
-        <button class="btn main" onClick=${put}>${editing ? '서랍 업데이트 ↘' : '서랍에 넣기 ↘'}</button>
+        <button class="btn" onClick=${() => store.set(st => ({ ...st, editingId: null, label: { ...defaultLabel(), tapeColor: st.label.tapeColor, inkColor: st.label.inkColor, invColor: st.label.invColor || '#FFFFFF' } }))}>↺ 새로</button>
+        <button class="btn main" onClick=${put}>${editing ? '서랍 업데이트 ↘' : 'PRINT!'}</button>
       </div>
     </div>`;
 }
 
+const CIRC = '⑴⑵⑶⑷⑸⑹⑺⑻⑼⑽⑾⑿⒀⒁⒂⒃⒄⒅⒆⒇';
 function TextSec({ s, taRef }) {
   const L = s.label;
   const custom = s.customFonts;
@@ -235,11 +238,42 @@ function TextSec({ s, taRef }) {
     await saveStoredFonts(list);
     store.set(st => ({ ...st, customFonts: st.customFonts.filter(f => f.id !== id), label: { ...st.label, fontId: 'galmuri11' } }));
   };
-  const B = (k, t) => html`<button class=${'btn sq' + (L[k] ? ' on' : '')} title=${t} aria-label=${t} onClick=${() => setLabel({ [k]: !L[k] })}><${UiIcon} name=${k} /></button>`;
+  // 드래그한 구간이 있으면 그 부분만, 없으면 전체
+  const [sel, setSel] = useState(null);
+  const [scroll, setScroll] = useState(0);
+  const [curLine, setCurLine] = useState(0);
+  useEffect(() => {
+    const f = () => {
+      const ta = taRef.current, focused = ta && document.activeElement === ta;
+      setSel(focused ? [ta.selectionStart, ta.selectionEnd] : null);
+      if (focused) setCurLine(ta.value.slice(0, ta.selectionStart).split('\n').length - 1); // 커서가 있는 줄
+    };
+    document.addEventListener('selectionchange', f);
+    return () => document.removeEventListener('selectionchange', f);
+  }, []);
+  const ranged = sel && sel[1] > sel[0];
+  const B = (k, t) => {
+    const on = ranged ? covered(L, k, sel[0], sel[1]) : !!L[k];
+    const part = !ranged && !L[k] && hasMarks(L, k);
+    const tip = t + ' (드래그한 부분만 / 선택 없으면 전체)';
+    return html`<button class=${'btn sq' + (on ? ' on' : '') + (part ? ' part' : '')} title=${tip} aria-label=${t}
+      onMouseDown=${e => e.preventDefault()}
+      onClick=${() => setLabel(l => ranged ? toggleMark(l, k, sel[0], sel[1]) : toggleAll(l, k))}><${UiIcon} name=${k} /></button>`;
+  };
+  const lines = (L.text || '').split('\n');
+  const multi = lines.length > 1;
+  const cur = Math.min(curLine, lines.length - 1);
+  const setSize = (i, v) => setLabel(l => { const ls = [...(l.lineSizes || [])]; while (ls.length <= i) ls.push('l'); ls[i] = v; return { lineSizes: ls }; });
+  const taH = Math.min(8, Math.max(3, lines.length)) * 20 + 15;
   const A = (v, t) => html`<button class=${'btn sq' + (L.align === v ? ' on' : '')} title=${t} aria-label=${t} onClick=${() => setLabel({ align: v })}><${UiIcon} name=${'al_' + v} /></button>`;
   return html`
     <${Sec} title="Text" sub="텍스트 · 폰트">
-      <textarea class="main" ref=${taRef} value=${L.text} onInput=${e => setLabel({ text: e.target.value })} placeholder="라벨에 넣을 글자"></textarea>
+      <div class=${'ed' + (multi ? ' multi' : '')}>
+        ${multi ? html`<div class="ed-no" style=${'height:' + taH + 'px'}><div style=${`transform:translateY(${-scroll}px)`}>
+          ${lines.map((_, i) => html`<div class=${'ed-row ln' + (i === cur ? ' on' : '')} title=${`${i + 1}번째 줄 크기 바꾸기`} onMouseDown=${e => e.preventDefault()} onClick=${() => setCurLine(i)}>${CIRC[i] || `(${i + 1})`}</div>`)}</div></div>` : null}
+        <textarea class="main" wrap="off" ref=${taRef} value=${L.text} style=${'height:' + taH + 'px'}
+          onInput=${e => setLabel(l => editText(l, e.target.value))} onScroll=${e => setScroll(e.target.scrollTop)} placeholder="라벨에 넣을 글자"></textarea>
+      </div>
       <div class="row" style="margin-top:8px">
         <select class="pill" value=${L.fontId} onChange=${e => setLabel({ fontId: e.target.value })}>
           ${Object.entries(groups).map(([g, fs]) => html`<optgroup label=${g}>${fs.map(f => html`<option value=${f.id}>${f.name}</option>`)}</optgroup>`)}
@@ -254,12 +288,18 @@ function TextSec({ s, taRef }) {
       </div>
       <div class="row">
         <span class="lbl">스타일</span>
-        ${B('bold', '굵게')}${B('italic', '기울임')}${B('underline', '밑줄')}${B('strike', '취소선')}${B('outline', '외곽선')}
+        ${B('bold', '굵게')}${B('italic', '기울임')}${B('underline', '밑줄')}${B('strike', '취소선')}${B('outline', '외곽선')}${B('hl', '텍스트 배경색')}
       </div>
       <div class="row">
         <span class="lbl">정렬</span>
         ${A('left', '왼쪽 정렬')}${A('center', '가운데 정렬')}${A('right', '오른쪽 정렬')}${A('justify', '양쪽 정렬')}
       </div>
+      ${multi ? html`
+        <div class="row">
+          <span class="lbl">줄 크기</span>
+          <span class="ln-cur">${CIRC[cur] || `(${cur + 1})`}</span>
+          <${Toggle} value=${L.lineSizes?.[cur] || 'l'} onChange=${v => setSize(cur, v)} options=${LINE_SIZES} />
+        </div>` : null}
       <div class="sub-h">내 폰트 추가</div>
       <div class="row">
         <button class="btn" onClick=${() => fileRef.current.click()}>📁 폰트 파일 (.ttf/.otf/.woff)</button>
@@ -287,8 +327,8 @@ function SizeSec({ s }) {
       <div class="row"><span class="lbl">방향</span>${O('h', '가로')}${O('v', '세로')}${O('square', '정방')}${O('free', '자유')}</div>
       ${L.orientation !== 'free' ? html`
         <div class="row"><span class="lbl">테이프</span>
-          ${TAPE_WIDTHS.map(w => html`<span class=${'chip' + (L.tapeMm === w ? ' on' : '')} onClick=${() => setLabel({ tapeMm: w })}>${w}</span>`)}
-          <input class="num" type="number" min="3" max="200" step="0.5" value=${L.tapeMm} onInput=${e => setLabel({ tapeMm: +e.target.value || 12 })} /><span style="font-size:10px">mm</span>
+          ${TAPE_WIDTHS.map(w => html`<span class=${'chip' + (L.tapeMm === w ? ' on' : '')} onClick=${() => setLabel({ tapeMm: w, tapePrev: null })}>${w}</span>`)}
+          <input class="num" type="number" min="3" max="200" step="0.5" value=${L.tapeMm} onInput=${e => setLabel({ tapeMm: +e.target.value || 12, tapePrev: null })} /><span style="font-size:10px">mm</span>
         </div>` : html`
         <div class="row"><span class="lbl">가로×세로</span>
           <input class="num" type="number" min="3" max="400" value=${L.freeW} onInput=${e => setLabel({ freeW: +e.target.value || 40 })} />×
@@ -343,12 +383,20 @@ function TypeSec({ s }) {
 }
 
 const FRAMES = [['none', '없음', ''], ['solid', '실선', 'border:1px solid'], ['dotted', '점선', 'border:1px dotted'], ['double', '이중', 'border:3px double']];
-const SPECIAL = [['music', '▶❚❚', '뮤직'], ['messenger', '💬', '메신저'], ['dogtag', '◉▭', '도그태그'], ['wongoji', '▦', '원고지'], ['bubble', '◖ ◗', '말풍선'], ['bubble2', '☺◖', '말풍선(캐릭터)'], ['omamori', '⛩', '오마모리'], ['notebook', '⁘▭', '수첩']];
+// 순서: 자유롭게 변형되는 것(가로/세로·길이) → 형식이 정해진 것
+const SPECIAL = [['dogtag', '◉▭', '군번줄'], ['wongoji', '▦', '원고지'], ['notebook', '⁘▭', '수첩'], ['lace', '⌒⌒', '레이스'],
+  ['messenger', '💬', '메신저'], ['bubble', '◖ ◗', '말풍선'], ['bubble2', '☺◖', '말풍선|(캐릭터)'], ['burst', '✸', '강조 말풍선'],
+  ['music', '▶❚❚', '뮤직'], ['omamori', '⛩', '오마모리'], ['virus', '▣↗', '믿어주세요...']];
+const SPECIAL_PER_PAGE = 8;
+const VIRUS_TEXT = { ko: '절대\n바이러스\n아닙니다.\n믿어\n주세요... 전\n돌고래입니\n다', en: 'Totally not a\nvirus.Trust\nme...im a\ndolphin' };
 const SPECIAL_DEFAULT_TEXT = {
   music: '노래 제목\n아티스트', messenger: '자도 자도\n계속 자고 싶어요…', dogtag: 'NAME : 콩이\nID : 0412-HWY',
   wongoji: '오늘의 일기', bubble: '소녀가 되…', bubble2: '자도 자도\n계속 자고 싶어요…', omamori: '행운가득', notebook: '내일 일은 난 몰라',
+  lace: '오늘의 기록', virus: VIRUS_TEXT.ko, burst: '이겨낸다!!',
 };
-const CAN_VERTICAL = { dogtag: true, wongoji: true }; // 세로형 지원 특수 프레임
+// 특수 프레임 때문에 테이프 폭을 키웠으면 일반 프레임으로 돌아갈 때 원래 폭으로
+const leaveSpecial = l => l.tapePrev != null ? { frame: 'none', tapeMm: l.tapePrev, tapePrev: null } : { frame: 'none' };
+const CAN_VERTICAL = { dogtag: true, wongoji: true, notebook: true, lace: true }; // 세로형 지원 특수 프레임
 const BUBBLE_STYLES = [['round', '심플'], ['corner', '모서리 뾰족'], ['cloud', '구름']];
 function FrameSec({ s }) {
   const L = s.label;
@@ -356,25 +404,45 @@ function FrameSec({ s }) {
   const setMusic = p => setLabel({ music: { ...m, ...p } });
   const bub = L.bubble || {};
   const setBub = p => setLabel({ bubble: { ...bub, ...p } });
-  const pickSpecial = v => setLabel(l => {
-    if (l.frame === v) return { frame: 'none' };
+  const pickSpecial = async v => {
+    // 믿어주세요...: 문구가 정해진 프레임이라 지금 텍스트를 덮어씀
+    if (v === 'virus' && L.frame !== 'virus') {
+      if (L.text.trim() && L.text !== VIRUS_TEXT.ko && L.text !== VIRUS_TEXT.en &&
+        !(await askConfirm('virusText', '이 프레임은 정해진 문구를 써요.\n지금 입력한 텍스트는 사라져요. 계속할까요?', { title: '텍스트 덮어쓰기', ok: '덮어쓰기' }))) return;
+      setLabel(l => ({ frame: 'virus', orientation: 'h', tapeMm: Math.max(l.tapeMm, 24), tapePrev: l.tapeMm < 24 ? l.tapeMm : l.tapePrev ?? null, text: VIRUS_TEXT.ko, marks: {}, lineSizes: [] }));
+      return;
+    }
+    pickOther(v);
+  };
+  const pickOther = v => setLabel(l => {
+    if (l.frame === v) return leaveSpecial(l);
     const patch = { frame: v, orientation: CAN_VERTICAL[v] && l.orientation === 'v' ? 'v' : 'h' };
-    const minTape = { music: 24, dogtag: 18, bubble2: 18, bubble: 12, omamori: 12 }[v];
-    if (minTape && l.tapeMm < minTape) patch.tapeMm = minTape;
+    const minTape = { music: 24, dogtag: 18, bubble2: 18, bubble: 12, omamori: 12, virus: 24, burst: 12, lace: 12 }[v];
+    if (minTape && l.tapeMm < minTape) { patch.tapeMm = minTape; patch.tapePrev = l.tapePrev ?? l.tapeMm; }
     // 기존 일반 라벨 텍스트면 프레임에 맞는 예시로 채움
     if (!SPECIAL_DEFAULT_TEXT[l.frame] && (v === 'music' || v === 'messenger' || v === 'dogtag') && !l.text.includes('\n')) patch.text = SPECIAL_DEFAULT_TEXT[v];
     if (!l.text.trim()) patch.text = SPECIAL_DEFAULT_TEXT[v];
+    if (patch.text) { patch.marks = {}; patch.lineSizes = []; }
     return patch;
   });
+  const [page, setPage] = useState(() => Math.max(0, Math.floor(SPECIAL.findIndex(x => x[0] === L.frame) / SPECIAL_PER_PAGE)));
+  const pages = Math.ceil(SPECIAL.length / SPECIAL_PER_PAGE);
+  const shown = SPECIAL.slice(page * SPECIAL_PER_PAGE, (page + 1) * SPECIAL_PER_PAGE);
+  const setText = t => setLabel({ text: t, marks: {}, lineSizes: [] });
   return html`
     <${Sec} title="Frame" sub="프레임">
       <div class="tiles" style="margin-bottom:6px">
-        ${FRAMES.map(([v, t, st]) => html`<button class=${'tile' + (L.frame === v ? ' on' : '')} onClick=${() => setLabel({ frame: v })}><span style=${st + ';padding:2px 6px'}>${t}</span></button>`)}
+        ${FRAMES.map(([v, t, st]) => html`<button class=${'tile' + (L.frame === v ? ' on' : '')} onClick=${() => setLabel(l => ({ ...leaveSpecial(l), frame: v }))}><span style=${st + ';padding:2px 6px'}>${t}</span></button>`)}
       </div>
       <div class="sub-h">Special</div>
       <div class="tiles">
-        ${SPECIAL.map(([v, i, t]) => html`<button class=${'tile' + (v && L.frame === v ? ' on' : '')} disabled=${!v} title=${v ? t : '준비 중'} onClick=${() => v && pickSpecial(v)}>${i}<br/>${t}</button>`)}
+        ${shown.map(([v, i, t]) => html`<button class=${'tile' + (L.frame === v ? ' on' : '')} title=${t.replace('|', ' ')} onClick=${() => pickSpecial(v)}>${i}${t.split('|').map(x => html`<br/>${x}`)}</button>`)}
       </div>
+      ${pages > 1 ? html`<div class="pager">
+        <button disabled=${page === 0} onClick=${() => setPage(page - 1)}>‹</button>
+        ${Array.from({ length: pages }, (_, i) => html`<button class=${i === page ? 'on' : ''} onClick=${() => setPage(i)}>${i + 1}</button>`)}
+        <button disabled=${page === pages - 1} onClick=${() => setPage(page + 1)}>›</button>
+      </div>` : null}
       ${L.frame === 'music' ? html`
         <div class="opt-box">
           <div class="row"><span class="lbl">시간</span>
@@ -399,6 +467,9 @@ function FrameSec({ s }) {
             </div>
             <div class="row"><label class="check"><input type="checkbox" checked=${!!bub.bleed} onChange=${e => setBub({ bleed: e.target.checked })} /> 말풍선이 테두리 밖으로</label></div>
             <div class="muted">캐릭터는 DECO의 CHAR</div>` : null}
+          ${L.frame === 'bubble' || L.frame === 'bubble2' ? html`
+            <div class="row"><label class="check"><input type="checkbox" checked=${!!bub.fill} onChange=${e => setBub({ fill: e.target.checked })} /> 안쪽 채우기 (잉크색)</label></div>
+            ${bub.fill ? html`<div class="muted">글자색은 COLOR의 반전색</div>` : null}` : null}
         </div>` : null}
       ${L.frame === 'omamori' ? html`
         <div class="opt-box">
@@ -408,6 +479,15 @@ function FrameSec({ s }) {
           </div>
           <div class="muted">${(L.omamori?.style || 'vertical') === 'charm' ? '가운데 그림은 DECO의 CHARM' : '줄마다 세로 한 줄 · 아래 장식은 DECO의 CHARM'}</div>
         </div>` : null}
+      ${L.frame === 'virus' ? html`
+        <div class="opt-box">
+          <div class="row"><span class="lbl">문구</span>
+            <button class="btn" onClick=${() => setText(VIRUS_TEXT.ko)}>한국어</button>
+            <button class="btn" onClick=${() => setText(VIRUS_TEXT.en)}>English</button>
+          </div>
+          <div class="muted">그림은 DECO의 ICON · 이름 칸 색은 잉크 + COLOR의 반전색</div>
+        </div>` : null}
+      ${L.frame === 'burst' ? html`<div class="opt-box"><div class="muted">색은 잉크 + COLOR의 반전색</div></div>` : null}
       ${L.frame === 'messenger' ? html`
         <div class="opt-box">
           <div class="row"><span class="lbl">첫 말풍선</span>
@@ -476,25 +556,46 @@ function BitmapMaker({ onDone }) {
       </div>` : null}`;
 }
 
+// 내 이미지 썸네일: 점 1개 = 1px 로 그린 뒤 브라우저가 부드럽게 줄여서 사진처럼 보이게
+const customThumbs = new Map();
+function customThumb(ic) {
+  let u = customThumbs.get(ic.id);
+  if (u) return u;
+  const h = ic.rows.length, w = ic.rows[0]?.length || 1;
+  const cv = document.createElement('canvas');
+  cv.width = w; cv.height = h;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#fff';
+  ic.rows.forEach((r, y) => { for (let x = 0; x < w; x++) if (r[x] === 'X') g.fillRect(x, y, 1, 1); });
+  u = cv.toDataURL();
+  customThumbs.set(ic.id, u);
+  return u;
+}
+
 function DecoSec({ s }) {
   const L = s.label;
   const hero = L.hero || { icon: null, textPos: 'bottom', size: 0.62 };
   const vert = L.orientation === 'v';
   // 특수 프레임: 가장자리 장식은 안 쓰고, 일부는 가운데 칸을 커버/캐릭터/부적으로 씀
-  const HERO_SLOT = { music: ['COVER', '앨범 커버'], bubble2: ['CHAR', '캐릭터'], omamori: ['CHARM', '아래 장식'] };
+  const HERO_SLOT = { music: ['COVER', '앨범 커버'], bubble2: ['CHAR', '캐릭터'], omamori: ['CHARM', '아래 장식'], virus: ['ICON', '아이콘 그림'] };
   const special = isSpecialFrame(L.frame);
   const heroSlot = HERO_SLOT[L.frame];
   const music = special; // (이름 유지) 특수 프레임이면 가장자리 장식 비활성
   const noHero = (special && !heroSlot) || (!special && vert);
   const slot = special ? 'hero' : (vert && s.ui.decoSlot === 'hero' ? 'left' : s.ui.decoSlot);
   const names = { top: '위', bottom: '아래', left: '왼쪽', right: '오른쪽', hero: heroSlot ? heroSlot[1] : '메인 그림' };
-  const D = (k, ch) => html`<button class=${(L.deco[k] ? 'has' : '') + (slot === k ? ' cur' : '')} disabled=${music} onClick=${() => setUi({ decoSlot: k })} title=${names[k]}>${ch}</button>`;
+  const groups = { ...ICON_GROUPS, ...(s.customIcons.length ? { '내 이미지': s.customIcons.map(i => i.id) } : {}) };
+  // 방향 버튼을 누르면 그 자리에 들어 있는 아이콘의 탭을 바로 열어줌
+  const goSlot = (k, icon) => {
+    const g = icon && Object.keys(groups).find(n => groups[n].includes(icon));
+    setUi(g ? { decoSlot: k, iconGroup: g } : { decoSlot: k });
+  };
+  const D = (k, ch) => html`<button class=${(L.deco[k] ? 'has' : '') + (slot === k ? ' cur' : '')} disabled=${music} onClick=${() => goSlot(k, L.deco[k])} title=${names[k]}>${ch}</button>`;
   const cur = slot === 'hero' ? hero.icon : L.deco[slot];
   const pick = n => setLabel(l => slot === 'hero'
     ? { hero: { ...hero, icon: hero.icon === n ? null : n } }
     : { deco: { ...l.deco, [slot]: l.deco[slot] === n ? null : n } });
   const setHero = p => setLabel({ hero: { ...hero, ...p } });
-  const groups = { ...ICON_GROUPS, ...(s.customIcons.length ? { '내 이미지': s.customIcons.map(i => i.id) } : {}) };
   const group = groups[s.ui.iconGroup] ? s.ui.iconGroup : '동물';
   const list = groups[group];
   const sideName = vert ? '좌/우' : '위/아래';
@@ -518,7 +619,7 @@ function DecoSec({ s }) {
         <div class="dpad">
           <span></span>${D('top', '↑')}<span></span>
           ${D('left', '←')}
-          <button class=${'c' + (hero.icon && !noHero ? ' has' : '') + (slot === 'hero' && !noHero ? ' cur' : '')} disabled=${noHero} title=${names.hero} onClick=${() => setUi({ decoSlot: 'hero' })}>${heroSlot ? heroSlot[0] : 'MAIN'}</button>
+          <button class=${'c' + (hero.icon && !noHero ? ' has' : '') + (slot === 'hero' && !noHero ? ' cur' : '')} disabled=${noHero} title=${names.hero} onClick=${() => goSlot('hero', hero.icon)}>${heroSlot ? heroSlot[0] : 'MAIN'}</button>
           ${D('right', '→')}
           <span></span>${D('bottom', '↓')}<span></span>
         </div>
@@ -545,9 +646,13 @@ function DecoSec({ s }) {
         </select>
         ${group === '내 이미지' && cur && cur.startsWith('img_') ? html`<button class="btn" onClick=${delCustom}>✕ 선택 이미지 삭제</button>` : null}
       </div>
-      <div class="lib">
-        ${list.map(n => html`<button class=${cur === n ? 'on' : ''} title=${n} onClick=${() => pick(n)}><${Px} name=${n} s=${2} c="#fff" fit=${26} /></button>`)}
-      </div>
+      ${group === '내 이미지' ? html`
+        <div class="lib big">
+          ${s.customIcons.map(ic => html`<button class=${cur === ic.id ? 'on' : ''} title=${ic.name} onClick=${() => pick(ic.id)}><img src=${customThumb(ic)} alt=${ic.name} /></button>`)}
+        </div>` : html`
+        <div class="lib">
+          ${list.map(n => html`<button class=${cur === n ? 'on' : ''} title=${n} onClick=${() => pick(n)}><${Px} name=${n} s=${2} c="#fff" fit=${26} /></button>`)}
+        </div>`}
       <${BitmapMaker} onDone=${addBitmap} />
     <//>`;
 }
@@ -559,7 +664,7 @@ function EmojiSec({ s, taRef }) {
     const ta = taRef.current;
     const a = ta ? ta.selectionStart : L.text.length, b = ta ? ta.selectionEnd : L.text.length;
     const text = L.text.slice(0, a) + t + L.text.slice(b);
-    setLabel({ text });
+    setLabel(l => editText(l, text));
     requestAnimationFrame(() => { if (ta) { ta.focus(); ta.selectionStart = ta.selectionEnd = a + t.length; } });
   };
   const addFav = async () => {
@@ -644,6 +749,22 @@ function Center({ s, fv }) {
   const scale = s.ui.zoom ? fit * s.ui.zoom : fit;
   const byId = useMemo(() => Object.fromEntries(drawer.map(l => [l.id, l])), [drawer]);
   const sel = s.ui.boardSel;
+  const picked = new Set(s.selected);
+  const clearSel = () => store.set(st => ({ ...st, selected: [], ui: { ...st.ui, boardSel: null } }));
+  // Delete 키: 판/서랍에서 선택한 라벨 지우기 (글자 입력 중엔 무시)
+  useEffect(() => {
+    const onKey = e => {
+      if (e.key !== 'Delete') return;
+      const t = e.target;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+      if (document.querySelector('.dlg-back')) return;
+      const st = store.get();
+      const ids = st.selected.length ? st.selected : st.ui.boardSel ? [st.ui.boardSel] : [];
+      if (ids.length) { e.preventDefault(); removeLabels(ids); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   const relayout = mode => {
     store.set(st => {
@@ -671,7 +792,13 @@ function Center({ s, fv }) {
   const startDrag = (e, it, mode) => {
     e.preventDefault();
     e.stopPropagation();
-    setUi({ boardSel: it.id });
+    // 판에서 고른 라벨 = 서랍에서 선택한 라벨 (shift/ctrl: 여러 개)
+    const multi = e.shiftKey || e.ctrlKey || e.metaKey;
+    store.set(st => {
+      const has = st.selected.includes(it.id);
+      const selected = multi ? (has && mode === 'move' ? st.selected.filter(x => x !== it.id) : has ? st.selected : [...st.selected, it.id]) : (has && mode !== 'move' ? st.selected : [it.id]);
+      return { ...st, selected, ui: { ...st.ui, boardSel: it.id } };
+    });
     const el = e.currentTarget.closest('.item');
     const r = el.getBoundingClientRect();
     const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
@@ -723,15 +850,15 @@ function Center({ s, fv }) {
         <button class="btn" onClick=${() => setUi({ zoom: 0 })}>${s.ui.zoom ? Math.round(s.ui.zoom * 100) + '%' : 'FIT'}</button>
         <button class="btn sq" onClick=${() => setUi({ zoom: Math.min(4, (s.ui.zoom || 1) + 0.25) })}>+</button>
       </div>
-      <div class="board-wrap" ref=${wrapRef} onPointerDown=${e => { if (e.target === e.currentTarget) setUi({ boardSel: null }); }}>
+      <div class="board-wrap" ref=${wrapRef} onPointerDown=${e => { if (e.target === e.currentTarget) clearSel(); }}>
         <div class=${'board ' + bgCls} style=${`width:${board.w * scale}px;height:${board.h * scale}px;${bgStyle}`}
-             onPointerMove=${onMove} onPointerUp=${onUp} onPointerCancel=${onUp} onLostPointerCapture=${onUp} onPointerDown=${e => { if (e.target === e.currentTarget) setUi({ boardSel: null }); }}>
+             onPointerMove=${onMove} onPointerUp=${onUp} onPointerCancel=${onUp} onLostPointerCapture=${onUp} onPointerDown=${e => { if (e.target === e.currentTarget) clearSel(); }}>
           ${board.items.map(it => {
             const L = byId[it.id];
             if (!L) return null;
             const im = labelImage(L, s.customFonts, ppm);
             const k = (it.s || 1) * scale;
-            return html`<div class=${'item' + (sel === it.id ? ' sel' : '')} key=${it.id}
+            return html`<div class=${'item' + (sel === it.id ? ' sel' : picked.has(it.id) ? ' picked' : '')} key=${it.id}
               style=${`left:${it.x * scale}px;top:${it.y * scale}px;width:${im.w * k}px;height:${im.h * k}px;transform:rotate(${it.rot || 0}deg)`}
               onPointerDown=${e => startDrag(e, it, 'move')}>
               <img src=${im.url} draggable="false" />
@@ -740,10 +867,22 @@ function Center({ s, fv }) {
                 <span class="hdl rs" title="크기" onPointerDown=${e => startDrag(e, it, 'resize')}></span>` : null}
             </div>`;
           })}
-          ${!drawer.length ? html`<div class="empty">서랍이 비어 있어요<br/>왼쪽에서 라벨을 만들고 [서랍에 넣기]</div>` : null}
+          ${!drawer.length ? html`<div class="empty">서랍이 비어 있어요<br/>왼쪽에서 라벨을 만들고 [PRINT!]</div>` : null}
         </div>
       </div>
     </main>`;
+}
+
+// 서랍에서 라벨 빼기 (서랍 ✕ / 판에서 Delete 키 공통)
+async function removeLabels(ids) {
+  if (!ids.length) return;
+  const msg = ids.length > 1 ? `라벨 ${ids.length}개를 서랍에서 뺄까요?` : '이 라벨을 서랍에서 뺄까요?';
+  if (!(await askConfirm('drawerDelete', msg, { title: '라벨 삭제', ok: '빼기' }))) return;
+  const gone = new Set(ids);
+  store.set(st => {
+    const next = { ...st, drawer: st.drawer.filter(d => !gone.has(d.id)), selected: st.selected.filter(x => !gone.has(x)), editingId: gone.has(st.editingId) ? null : st.editingId, ui: { ...st.ui, boardSel: gone.has(st.ui.boardSel) ? null : st.ui.boardSel } };
+    return { ...next, board: syncBoard(next) };
+  });
 }
 
 // ---------------- RIGHT ----------------
@@ -757,13 +896,7 @@ function Drawer({ s }) {
     const next = { ...st, drawer };
     return { ...next, board: syncBoard(next) };
   });
-  const del = async L => {
-    if (!(await askConfirm('drawerDelete', '이 라벨을 서랍에서 뺄까요?', { title: '라벨 삭제', ok: '빼기' }))) return;
-    store.set(st => {
-      const next = { ...st, drawer: st.drawer.filter(d => d.id !== L.id), selected: st.selected.filter(x => x !== L.id), editingId: st.editingId === L.id ? null : st.editingId };
-      return { ...next, board: syncBoard(next) };
-    });
-  };
+  const del = L => removeLabels([L.id]);
   const move = (L, d) => store.set(st => {
     const drawer = st.drawer.slice();
     const i = drawer.findIndex(x => x.id === L.id), j = i + d;
@@ -848,7 +981,7 @@ function PaletteSec({ s }) {
     const palette = st.palette.slice(); palette[i] = c;
     // 현재 라벨이 이 색을 쓰고 있으면 함께 변경
     const L = st.label;
-    const label = { ...L, tapeColor: L.tapeColor === old ? c : L.tapeColor, inkColor: L.inkColor === old ? c : L.inkColor };
+    const label = { ...L, tapeColor: L.tapeColor === old ? c : L.tapeColor, inkColor: L.inkColor === old ? c : L.inkColor, invColor: L.invColor === old ? c : L.invColor };
     return { ...st, palette, label, palettePresetId: 'custom' };
   });
   const choose = id => {
@@ -873,12 +1006,12 @@ function PaletteSec({ s }) {
   const editing = !!s.ui.paletteEdit;
   const same = (a, b) => (a || '').toLowerCase() === (b || '').toLowerCase();
   const T = (k, t) => html`<button class=${'tgt' + (target === k ? ' on' : '')} onClick=${() => setUi({ colorTarget: k })}>
-      <span class="mini" style=${'background:' + L[k]}></span>${t}</button>`;
+      <span class="mini" style=${'background:' + (L[k] || '#FFFFFF')}></span>${t}</button>`;
   return html`
     <div class="sec">
       <div class="h">Color <i>테이프 · 잉크 · 팔레트</i></div>
       <div class="body">
-        <div class="row tgts">${T('tapeColor', '테이프')}${T('inkColor', '잉크')}</div>
+        <div class="row tgts">${T('tapeColor', '테이프')}${T('inkColor', '잉크')}${T('invColor', '반전')}</div>
         <div class="row"><span class="pal">
           ${s.palette.map((c, i) => editing
             ? html`<label class="sw edit" style=${'background:' + c} title=${c + ' 바꾸기'}><input type="color" value=${c} onInput=${e => setColor(i, e.target.value)} /></label>`
@@ -922,7 +1055,7 @@ function PrintBox({ s }) {
       const ppm = ui.dpi / 25.4;
       const render1 = L => renderLabel(L, fontById(L.fontId, st.customFonts).family, ppm).canvas;
       if (ui.printMode === 'board') {
-        const cv = await renderBoard(st, { transparent: ui.transparent || st.board.bg === 'trans' });
+        const cv = await renderBoard(st, { transparent: st.board.bg === 'trans' });
         download(await canvasToBlob(cv), `hwy-label_board_${st.board.w}x${st.board.h}.png`);
       } else if (ui.printMode === 'zip') {
         const zip = new window.JSZip();
@@ -934,7 +1067,7 @@ function PrintBox({ s }) {
           await new Promise(r => setTimeout(r, 250));
         }
       }
-      toast('PRINT! 완료 ✧');
+      toast('CUT✂ 완료 ✧');
     } catch (e) {
       console.error(e);
       toast('내보내기에 실패했어요');
@@ -950,9 +1083,9 @@ function PrintBox({ s }) {
         ${R('single', '선택 라벨 개별 PNG')}
         ${ui.printMode !== 'board' ? html`<div class="row" style="margin:6px 0 4px"><span class="lbl">해상도</span>
           ${[180, 300, 360].map(d => html`<span class=${'chip' + (ui.dpi === d ? ' on' : '')} onClick=${() => setUi({ dpi: d })}>${d}dpi</span>`)}</div>`
-        : html`<div class="row" style="margin:6px 0 4px"><label class="check" style="margin:0"><input type="checkbox" checked=${ui.transparent} onChange=${e => setUi({ transparent: e.target.checked })} /> 배경 없이 (투명)</label></div>`}
+        : null}
       </div>
-      <button class="print" disabled=${busy} onClick=${go} style="margin-top:6px">${busy ? 'PRINTING…' : 'PRINT!'}</button>
+      <button class="print" disabled=${busy} onClick=${go} style="margin-top:6px">${busy ? 'CUTTING…' : 'CUT✂'}</button>
     </div>`;
 }
 
@@ -976,6 +1109,7 @@ function App() {
   const fv = useFontsV();
   const [saveState, setSaveState] = useState('saved');
   useEffect(() => store.onSave(setSaveState), []);
+  useEffect(() => { window.addEventListener('label-img-loaded', bumpFonts); return () => window.removeEventListener('label-img-loaded', bumpFonts); }, []);
   // 사용 중인 폰트 로드
   useEffect(() => {
     const ids = new Set([s.label.fontId, ...s.drawer.map(d => d.fontId)]);

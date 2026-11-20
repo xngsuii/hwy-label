@@ -1,12 +1,12 @@
 // 라벨 렌더러: Label 객체 → canvas. 모든 레이아웃은 mm 단위로 계산 후 pxPerMm으로 그림.
 import { drawIcon, iconSize } from './pixel.js';
+import { richLines, graphemes } from './rich.js';
+export { graphemes };
 
 const PT_MM = 0.3528;
 const FRAME_LW = 0.17;     // mm (300dpi ≈ 2px, 180dpi ≈ 1px)
 const FRAME_INSET = 0.7;   // mm
 
-const seg = typeof Intl !== 'undefined' && Intl.Segmenter ? new Intl.Segmenter('ko', { granularity: 'grapheme' }) : null;
-export const graphemes = s => seg ? Array.from(seg.segment(s), x => x.segment) : Array.from(s);
 
 const mctx = document.createElement('canvas').getContext('2d');
 const mcache = new Map();
@@ -30,6 +30,22 @@ function fontStack(family, mono) {
 function fontStr(L, family, px) {
   return `${L.italic ? 'italic ' : ''}${L.bold ? 700 : 400} ${px}px ${fontStack(family, L.emojiMono)}`;
 }
+// 글자별 스타일 st 기준 폰트
+function fontStrS(st, L, family, px) {
+  return `${st.italic ? 'italic ' : ''}${st.bold ? 700 : 400} ${px}px ${fontStack(family, L.emojiMono)}`;
+}
+// 사진(데이터 URL) 캐시: 로드되면 다시 그리도록 알림
+const imgCache = new Map();
+function getImg(src) {
+  let im = imgCache.get(src);
+  if (!im) {
+    im = new Image();
+    im.onload = () => window.dispatchEvent(new Event('label-img-loaded'));
+    im.src = src;
+    imgCache.set(src, im);
+  }
+  return im.complete && im.naturalWidth ? im : null;
+}
 
 function frameSpace(frame) {
   if (frame === 'none') return 0;
@@ -40,12 +56,11 @@ function frameSpace(frame) {
 export function layoutLabel(L, family) {
   if (SPECIAL[L.frame]) return SPECIAL[L.frame].layout(L, family);
   const vert = L.orientation === 'v';
-  const lines = (L.text || ' ').split('\n').map(l => graphemes(l));
+  const lines = richLines(L, L.text || ' ');
   const n = Math.max(1, lines.length);
   const lead = Math.max(0.5, L.leading);
   const tr = (L.tracking || 0) / 100;
   const ws = (L.widthScale || 100) / 100;
-  const f100 = fontStr(L, family, 100);
 
   let crossSize, flowSize = null;
   const fixedFlow = L.orientation === 'square' || L.orientation === 'free' || L.lengthMode === 'fixed';
@@ -79,7 +94,8 @@ export function layoutLabel(L, family) {
   }
   let textC = Math.max(0.3, innerC - heroH - heroGap);
 
-  const blockFactor = 1 + (n - 1) * lead;
+  // 줄별 크기(작게/중간/크게) 반영한 블록 높이 배율
+  const blockFactor = lines.reduce((a, l, i) => a + l.k * (i < n - 1 ? lead : 1), 0);
   let fs;
   if (L.sizeMode === 'manual') {
     fs = L.sizePt * PT_MM;
@@ -98,11 +114,12 @@ export function layoutLabel(L, family) {
   }
   if (!hasText && hero) fs = 0.01;
 
-  const flowLen = (line, f) => {
-    if (!line.length) return 0;
-    if (vert) return line.length * f * (1 + tr) - tr * f;
+  const flowLen = (line, f0) => {
+    const gs = line.gs, f = f0 * line.k;
+    if (!gs.length) return 0;
+    if (vert) return gs.length * f * (1 + tr) - tr * f;
     let w = 0;
-    for (const g of line) w += m100(f100, g) / 100 * f * ws + tr * f;
+    for (const { g, st } of gs) w += m100(fontStrS(st, L, family, 100), g) / 100 * f * ws + tr * f;
     return w - tr * f;
   };
 
@@ -145,7 +162,7 @@ export function layoutLabel(L, family) {
 
   const wMm = vert ? crossSize : flowSize;
   const hMm = vert ? flowSize : crossSize;
-  return { vert, lines, n, lead, tr, ws, fs, crossSize, flowSize, wMm, hMm, fs0, padF, padC, innerC, baseC,
+  return { vert, lines, n, lead, tr, ws, fs, blockFactor, crossSize, flowSize, wMm, hMm, fs0, padF, padC, innerC, baseC,
     cdSize, cdGap, crossDecoKeys, flowDeco, gap, hero, heroH, heroW, heroGap, hasText, ...c, family };
 }
 
@@ -235,47 +252,68 @@ export function renderLabel(L, family, pxPerMm = 10) {
   }
   if (Y.hero && !Y.hasText) return { canvas: cv, wMm: Y.wMm, hMm: Y.hMm, layout: Y };
 
-  const fsPx = Y.fs * P;
-  ctx.font = fontStr(L, family, fsPx);
-  ctx.textBaseline = 'middle';
-  ctx.fillStyle = ink;
-  const blockC = Y.fs * (1 + (Y.n - 1) * Y.lead);
+  const blockC = Y.fs * Y.blockFactor;
   const c0 = tStart + (tLen - blockC) / 2;
-  const f100 = fontStr(L, family, 100);
-  const deco = Math.max(1, Y.fs * 0.07 * P);
-
+  ctx.textBaseline = 'middle';
+  // 흐름(f)·교차(c) 좌표 사각형 채우기
+  const rectFC = (f0, f1, ca, cb) => {
+    if (Y.vert) ctx.fillRect((Y.crossSize - cb) * P, f0 * P, (cb - ca) * P, (f1 - f0) * P);
+    else ctx.fillRect(f0 * P, ca * P, (f1 - f0) * P, (cb - ca) * P);
+  };
+  let acc = 0;
   Y.lines.forEach((line, i) => {
-    const cMid = c0 + Y.fs / 2 + i * Y.fs * Y.lead;
-    const len = Y.lens[i];
-    let extra = 0, f = fA;
+    const fsk = Y.fs * line.k, pxk = fsk * P;
+    const cMid = c0 + acc + fsk / 2;
+    acc += fsk * Y.lead;
+    const gs = line.gs, len = Y.lens[i];
+    let extra = 0, f;
     if (L.align === 'left') f = fA;
     else if (L.align === 'right') f = fA + (areaLen - len);
-    else if (L.align === 'justify' && line.length > 1) { extra = (areaLen - len) / (line.length - 1); f = fA; }
+    else if (L.align === 'justify' && gs.length > 1) { extra = (areaLen - len) / (gs.length - 1); f = fA; }
     else f = fA + (areaLen - len) / 2;
-    const fStart = f;
-    for (const g of line) {
-      const adv = Y.vert ? Y.fs : m100(f100, g) / 100 * Y.fs * Y.ws;
-      if (Y.vert) {
-        const [x, y] = xy(f + Y.fs / 2, cMid);
-        glyph(ctx, g, x, y, 'center', Y.ws, L, ink, fsPx);
-      } else {
-        const [x, y] = xy(f, cMid);
-        glyph(ctx, g, x, y, 'left', Y.ws, L, ink, fsPx);
-      }
-      f += adv + Y.tr * Y.fs + extra;
-    }
-    const fEnd = f - Y.tr * Y.fs - extra;
-    if (line.length && (L.underline || L.strike)) {
-      ctx.fillStyle = ink;
+    // 글자 위치 계산
+    const pos = gs.map(({ g, st }, j) => {
+      const adv = Y.vert ? fsk : m100(fontStrS(st, L, family, 100), g) / 100 * fsk * Y.ws;
+      const step = j < gs.length - 1 ? Y.tr * fsk + extra : 0;
+      const r = [f, adv, step];
+      f += adv + Y.tr * fsk + extra;
+      return r;
+    });
+    // 1) 텍스트 배경색
+    ctx.fillStyle = ink;
+    gs.forEach(({ st }, j) => {
+      if (!st.hl) return;
+      const [f0, adv, step] = pos[j];
+      const pa = j === 0 || !gs[j - 1].st.hl ? fsk * 0.14 : 0;
+      const pb = j === gs.length - 1 || !gs[j + 1].st.hl ? fsk * 0.14 : step;
+      rectFC(f0 - pa, f0 + adv + pb, cMid - fsk * 0.62, cMid + fsk * 0.62);
+    });
+    // 2) 글자
+    let curFont = '';
+    gs.forEach(({ g, st }, j) => {
+      const fnt = fontStrS(st, L, family, pxk);
+      if (fnt !== curFont) { ctx.font = fnt; curFont = fnt; }
+      const col = st.hl ? L.invColor || '#ffffff' : ink;
+      const hollow = st.hl ? ink : L.tapeColor;
+      const [f0] = pos[j];
+      if (Y.vert) { const [x, y] = xy(f0 + fsk / 2, cMid); glyph(ctx, g, x, y, 'center', Y.ws, st, col, hollow, pxk); }
+      else { const [x, y] = xy(f0, cMid); glyph(ctx, g, x, y, 'left', Y.ws, st, col, hollow, pxk); }
+    });
+    // 3) 밑줄 / 취소선
+    const th = Math.max(1, fsk * 0.07 * P) / P;
+    gs.forEach(({ st }, j) => {
+      if (!st.underline && !st.strike) return;
+      const [f0, adv, step] = pos[j];
+      ctx.fillStyle = st.hl ? L.invColor || '#ffffff' : ink;
+      const w = adv + (j < gs.length - 1 && (gs[j + 1].st.underline || gs[j + 1].st.strike) ? step : 0);
       if (!Y.vert) {
-        if (L.underline) ctx.fillRect(fStart * P, (cMid + Y.fs * 0.46) * P, (fEnd - fStart) * P, deco);
-        if (L.strike) ctx.fillRect(fStart * P, cMid * P - deco / 2, (fEnd - fStart) * P, deco);
+        if (st.underline) rectFC(f0, f0 + w, cMid + fsk * 0.46, cMid + fsk * 0.46 + th);
+        if (st.strike) rectFC(f0, f0 + w, cMid - th / 2, cMid + th / 2);
       } else {
-        const [xc] = xy(0, cMid);
-        if (L.underline) ctx.fillRect(xc - Y.fs * 0.56 * P, fStart * P, deco, (fEnd - fStart) * P);
-        if (L.strike) ctx.fillRect(xc - deco / 2, fStart * P, deco, (fEnd - fStart) * P);
+        if (st.underline) rectFC(f0, f0 + w, cMid - fsk * 0.56 - th, cMid - fsk * 0.56);
+        if (st.strike) rectFC(f0, f0 + w, cMid - th / 2, cMid + th / 2);
       }
-    }
+    });
   });
 
   return { canvas: cv, wMm: Y.wMm, hMm: Y.hMm, layout: Y };
@@ -283,17 +321,17 @@ export function renderLabel(L, family, pxPerMm = 10) {
 
 const snap = c => c >= 1.5 ? Math.round(c) : Math.max(1, c);
 
-function glyph(ctx, g, x, y, align, ws, L, ink, fsPx) {
+function glyph(ctx, g, x, y, align, ws, st, ink, hollow, fsPx) {
   ctx.save();
   ctx.translate(x, y);
   if (ws !== 1) ctx.scale(ws, 1);
   ctx.textAlign = align;
-  if (L.outline) {
+  if (st.outline) {
     ctx.lineJoin = 'round';
     ctx.lineWidth = Math.max(1.5, fsPx * 0.14);
     ctx.strokeStyle = ink;
     ctx.strokeText(g, 0, 0);
-    ctx.fillStyle = L.tapeColor;
+    ctx.fillStyle = hollow;
     ctx.fillText(g, 0, 0);
   } else {
     ctx.fillStyle = ink;
@@ -364,7 +402,7 @@ function iconAt(ctx, P, name, x, y, boxW, boxH, color) {
   const { w, h } = iconSize(name);
   if (!w) return;
   const cell = Math.min(boxW / w, boxH / h);
-  const c = snap(cell * P);
+  const c0 = cell * P, c = c0 >= 2 ? Math.floor(c0) : c0; // 내림: 상자보다 커지지 않게
   const rw = w * c / P, rh = h * c / P;
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -466,25 +504,86 @@ const MUSIC = {
 };
 
 // ---------- 공통 헬퍼 ----------
-const linesOf = L => (L.text || '').split('\n');
+// 특수 프레임용 줄: { text, k(줄별 크기), gs: [{ g, st }] }
+const linesOf = L => richLines(L);
 const autoFs = (L, fit) => L.sizeMode === 'manual' ? L.sizePt * PT_MM : fit;
-function maxLineW(L, family, lines, fs) {
-  const f = fontStr(L, family, 100);
-  const ws = (L.widthScale || 100) / 100;
-  return Math.max(0, ...lines.map(l => textW(f, l, fs) * ws));
+function lineW(L, family, line, fs) {
+  const ws = (L.widthScale || 100) / 100, f = fs * line.k;
+  let w = 0;
+  for (const { g, st } of line.gs) w += m100(fontStrS(st, L, family, 100), g) / 100 * f * ws;
+  return w;
 }
-function txt(ctx, L, family, s, x, y, fs, align = 'left', maxW = Infinity) {
-  ctx.font = fontStr(L, family, fs);
-  ctx.textBaseline = 'middle';
+function maxLineW(L, family, lines, fs) {
+  return Math.max(0, ...lines.map(l => lineW(L, family, l, fs)));
+}
+// 배경색(hl) 위 글자색: 기본은 반전 글씨색, 이미 반전 글씨색으로 쓰는 중이면 잉크색
+const hlText = (L, base) => (base || '').toLowerCase() === (L.invColor || '#ffffff').toLowerCase() ? L.inkColor : (L.invColor || '#ffffff');
+// 가로 한 줄 (글자별 스타일). 현재 ctx.fillStyle 을 글자색으로 씀. maxW 넘으면 가로로 눌러 맞춤
+function txt(ctx, L, family, line, x, y, fs, align = 'left', maxW = Infinity) {
+  const base = ctx.fillStyle, fsk = fs * line.k, gs = line.gs;
   const ws = (L.widthScale || 100) / 100;
-  const w = ctx.measureText(s).width * ws;
-  const k = w > maxW && w > 0 ? ws * maxW / w : ws;
+  const advs = gs.map(({ g, st }) => m100(fontStrS(st, L, family, 100), g) / 100 * fsk * ws);
+  const w = advs.reduce((a, b) => a + b, 0);
+  const k = w > maxW && w > 0 ? maxW / w : 1;
+  const x0 = align === 'center' ? x - w * k / 2 : align === 'right' ? x - w * k : x;
+  const hc = hlText(L, base);
   ctx.save();
-  ctx.translate(x, y);
-  ctx.scale(k, 1);
-  ctx.textAlign = align;
-  ctx.fillText(s, 0, 0);
+  ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+  let f = x0;
+  gs.forEach(({ st }, j) => {
+    const a = advs[j] * k;
+    if (st.hl) {
+      const pa = j === 0 || !gs[j - 1].st.hl ? fsk * 0.14 : 0;
+      const pb = j === gs.length - 1 || !gs[j + 1].st.hl ? fsk * 0.14 : 0;
+      ctx.fillStyle = base; ctx.fillRect(f - pa, y - fsk * 0.62, a + pa + pb, fsk * 1.24);
+    }
+    f += a;
+  });
+  f = x0;
+  gs.forEach(({ g, st }, j) => {
+    const a = advs[j] * k, col = st.hl ? hc : base;
+    ctx.font = fontStrS(st, L, family, fsk);
+    ctx.save(); ctx.translate(f, y); ctx.scale(ws * k, 1);
+    if (st.outline) {
+      ctx.lineJoin = 'round'; ctx.lineWidth = fsk * 0.14; ctx.strokeStyle = col; ctx.strokeText(g, 0, 0);
+      ctx.fillStyle = st.hl ? base : L.tapeColor; ctx.fillText(g, 0, 0);
+    } else { ctx.fillStyle = col; ctx.fillText(g, 0, 0); }
+    ctx.restore();
+    if (st.underline || st.strike) {
+      ctx.fillStyle = col;
+      const t = fsk * 0.07, nx = j < gs.length - 1 && (gs[j + 1].st.underline || gs[j + 1].st.strike);
+      if (st.underline) ctx.fillRect(f, y + fsk * 0.46, a + (nx ? 0.01 : 0), t);
+      if (st.strike) ctx.fillRect(f, y - t / 2, a + (nx ? 0.01 : 0), t);
+    }
+    f += a;
+  });
   ctx.restore();
+  ctx.fillStyle = base;
+}
+// 세로쓰기 한 글자 (가운데 기준). step = 글자 간격
+function vChar(ctx, L, family, { g, st }, x, y, fs, step = fs * 1.06) {
+  const base = ctx.fillStyle;
+  if (st.hl) ctx.fillRect(x - fs * 0.62, y - step / 2 - 0.01, fs * 1.24, step + 0.02);
+  ctx.font = fontStrS(st, L, family, fs);
+  const col = st.hl ? hlText(L, base) : base;
+  if (st.outline) {
+    ctx.lineJoin = 'round'; ctx.lineWidth = fs * 0.14; ctx.strokeStyle = col; ctx.strokeText(g, x, y);
+    ctx.fillStyle = st.hl ? base : L.tapeColor; ctx.fillText(g, x, y);
+  } else { ctx.fillStyle = col; ctx.fillText(g, x, y); }
+  ctx.fillStyle = col;
+  if (st.underline) ctx.fillRect(x + fs * 0.56, y - step / 2, fs * 0.07, step);
+  if (st.strike) ctx.fillRect(x - fs * 0.035, y - step / 2, fs * 0.07, step);
+  ctx.fillStyle = base;
+}
+// 세로쓰기 여러 줄: 오른쪽 줄부터. cx = 가운데, top = 첫 글자 위
+function vCols(ctx, L, family, cols, cx, top, fs, colStep, charStep) {
+  const n = cols.length;
+  const startX = cx + (n - 1) * colStep / 2;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  cols.forEach((col, i) => {
+    const f = fs * col.k;
+    col.gs.forEach((ch, k) => vChar(ctx, L, family, ch, startX - i * colStep, top + k * charStep * col.k + charStep * col.k / 2, f, charStep * col.k));
+  });
 }
 function alignedX(L, x, w) {
   return L.align === 'left' ? [x, 'left'] : L.align === 'right' ? [x + w, 'right'] : [x + w / 2, 'center'];
@@ -562,12 +661,11 @@ const MESSENGER = {
   layout(L, family) {
     const fs = L.sizeMode === 'manual' ? L.sizePt * PT_MM : L.tapeMm * 0.26;
     const st = L.bubble?.style || 'round';
-    const lines = (L.text || '').split('\n').filter(l => l.trim().length);
-    const f100 = fontStr(L, family, 100);
+    const lines = linesOf(L).filter(l => l.text.trim().length);
     const bpx = fs * 0.6, bpy = fs * 0.36, tail = fs * 0.4, padM = fs * 0.55;
     const gap = fs * (st === 'cloud' ? 0.85 : 0.35);
     const bh = fs + 2 * bpy;
-    const widths = lines.map(l => textW(f100, l, fs) * (L.widthScale || 100) / 100 + 2 * bpx);
+    const widths = lines.map(l => lineW(L, family, l, fs) + 2 * bpx);
     const maxB = Math.max(fs * 2, ...widths);
     const n = Math.max(1, lines.length);
     const extra = st === 'cloud' ? bh / 6 : 0;
@@ -604,14 +702,13 @@ const DOGTAG = {
     const lines = linesOf(L), n = Math.max(1, lines.length), lead = Math.max(1, L.leading);
     const T = L.tapeMm, pad = T * 0.12, hole = T * 0.11;
     if (vert) {
-      const cols = lines.map(l => graphemes(l));
-      const maxC = Math.max(1, ...cols.map(c => c.length));
+      const maxC = Math.max(1, ...lines.map(c => c.gs.length * c.k));
       let fs = autoFs(L, (T - 2 * pad - T * 0.1) / (1 + (n - 1) * lead) * 0.75);
       fs = Math.min(fs, (T - 2 * pad) / (1 + (n - 1) * lead));
       const textTop = pad + hole + T * 0.24;
       const charStep = fs * (1.05 + (L.tracking || 0) / 100);
       const H = L.lengthMode === 'fixed' ? L.lengthMm : Math.max(T * 1.8, textTop + maxC * charStep + pad * 1.8);
-      return { special: 'dogtag', vert, wMm: T, hMm: H, cols, n, fs, lead, pad, hole, textTop, charStep, T };
+      return { special: 'dogtag', vert, wMm: T, hMm: H, cols: lines, n, fs, lead, pad, hole, textTop, charStep, T };
     }
     let fs = autoFs(L, Math.min((T - 2 * pad - T * 0.08) / (n * lead), T * 0.24) * 0.85);
     if (L.wrapMode !== 'grow') fs = Math.min(fs, (T - 2 * pad) / (n * lead));
@@ -649,12 +746,7 @@ const DOGTAG = {
       ctx.fillStyle = ink; draw(0);
     };
     if (Y.vert) {
-      const startX = W / 2 + (n - 1) * fs * lead / 2;
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      emboss(o => {
-        ctx.font = fontStr(L, family, fs);
-        Y.cols.forEach((col, i) => col.forEach((ch, k) => ctx.fillText(ch, startX - i * fs * lead + o, Y.textTop + k * Y.charStep + Y.charStep / 2 + o)));
-      });
+      emboss(o => vCols(ctx, L, family, Y.cols, W / 2 + o, Y.textTop + o, fs, fs * lead, Y.charStep));
       return;
     }
     const y0 = (H - n * fs * lead) / 2 + fs * lead / 2, maxW = W - Y.textX - pad;
@@ -666,8 +758,8 @@ const DOGTAG = {
 const WONGOJI = {
   layout(L) {
     const vert = L.orientation === 'v';
-    const lines = linesOf(L).map(l => graphemes(l)), n = Math.max(1, lines.length);
-    const cols = Math.max(1, ...lines.map(l => l.length));
+    const lines = linesOf(L), n = Math.max(1, lines.length);
+    const cols = Math.max(1, ...lines.map(l => l.gs.length));
     const T = L.tapeMm, pad = T * 0.07, g = 0.3;
     let cell = L.wrapMode === 'grow' ? (T - 2 * pad) / (1 + 2 * g) : (T - 2 * pad) / (n + (n + 1) * g);
     if (L.lengthMode === 'fixed') cell = Math.min(cell, (L.lengthMm - 2 * pad) / (cols + 2 * g));
@@ -685,6 +777,9 @@ const WONGOJI = {
     const cellXY = (i, c) => vert
       ? [x0 + gw - g * cell - (i + 1) * cell - i * g * cell, y0 + c * cell]
       : [x0 + c * cell, y0 + g * cell + i * cell * (1 + g)];
+    // 배경색 칸 먼저
+    ctx.fillStyle = ink;
+    lines.forEach((l, i) => l.gs.forEach(({ st }, c) => { if (st.hl) { const [cx, cy] = cellXY(i, c); ctx.fillRect(cx, cy, cell, cell); } }));
     ctx.strokeStyle = ink;
     ctx.lineWidth = lw * 1.7;
     if (vert) ctx.strokeRect(x0, y0 - g * cell, gw, gh + 2 * g * cell);
@@ -701,14 +796,24 @@ const WONGOJI = {
       ctx.stroke();
     }
     ctx.restore();
-    ctx.fillStyle = ink; ctx.textBaseline = 'middle'; ctx.textAlign = 'center';
-    ctx.font = fontStr(L, family, cell * 0.68);
-    lines.forEach((l, i) => l.forEach((ch, c) => {
+    ctx.textBaseline = 'middle'; ctx.textAlign = 'center';
+    lines.forEach((l, i) => l.gs.forEach(({ g: ch, st }, c) => {
       const [cx, cy] = cellXY(i, c);
-      ctx.fillText(ch, cx + cell / 2, cy + cell * 0.53);
+      ctx.fillStyle = ink;
+      vChar(ctx, L, family, { g: ch, st: { ...st, hl: false } }, cx + cell / 2, cy + cell * 0.53, cell * 0.68 * l.k, cell * 0.9);
+      if (st.hl) { // 칠한 칸 위 글자
+        ctx.fillStyle = L.invColor || '#ffffff';
+        ctx.font = fontStrS(st, L, family, cell * 0.68 * l.k);
+        ctx.fillText(ch, cx + cell / 2, cy + cell * 0.53);
+      }
     }));
   },
 };
+
+// 말풍선 채우기 옵션: 안쪽을 잉크색으로 칠하면 글자는 반전 글씨색
+const bubbleColors = L => L.bubble?.fill
+  ? { fill: L.inkColor, text: L.invColor || '#ffffff' }
+  : { fill: '#ffffff', text: L.inkColor };
 
 // ---------- 말풍선 (일반) ----------
 const BUBBLE = {
@@ -731,10 +836,10 @@ const BUBBLE = {
   },
   draw(ctx, L, family, Y, P) {
     const { lines, n, lead, fs, pad, tl, m, bodyW, bodyH, bx, st, tailMode, sideRoom, T } = Y;
-    const ink = L.inkColor, lw = Math.max(1 / P, T * 0.014);
+    const ink = L.inkColor, lw = Math.max(1 / P, T * 0.014), c = bubbleColors(L);
     const x = pad + m + sideRoom, y = pad + m;
-    drawBubble(ctx, st, x, y, bodyW, bodyH, { tail: tailMode, tl, ink, lw });
-    ctx.fillStyle = ink;
+    drawBubble(ctx, st, x, y, bodyW, bodyH, { tail: tailMode, tl, ink, lw, fill: c.fill });
+    ctx.fillStyle = c.text;
     const y0 = y + (bodyH - n * fs * lead) / 2 + fs * lead / 2;
     const [tx, al] = alignedX(L, x + bx, bodyW - 2 * bx);
     lines.forEach((l, i) => txt(ctx, L, family, l, tx, y0 + i * fs * lead, fs, al, bodyW - 2 * bx));
@@ -767,7 +872,7 @@ const BUBBLE2 = {
   },
   draw(ctx, L, family, Y, P) {
     const { wMm: W, hMm: H, lines, n, lead, fs, pad, m, tail, icon, iconW, iconH, near, bodyW, bodyH, bx, st, bleed, T } = Y;
-    const ink = L.inkColor, lw = Math.max(1 / P, T * 0.014);
+    const ink = L.inkColor, lw = Math.max(1 / P, T * 0.014), c = bubbleColors(L);
     const right = L.bubble?.charSide === 'right';
     const mx = (x, w) => right ? W - x - w : x; // 캐릭터 오른쪽이면 좌우 반전
     const iy = bleed ? (H - iconH) / 2 : H - pad - iconH;
@@ -777,14 +882,14 @@ const BUBBLE2 = {
       const over = T * 0.35;
       const drawW = bodyW + T;
       drawBubble(ctx, st, mx(near, drawW), -over, drawW, H + 2 * over, {
-        side: right ? 'right' : 'left', tail: st === 'corner' ? 'none' : 'edge', tl: tail, ink, lw, radius: (H + 2 * over) * 0.32,
+        side: right ? 'right' : 'left', tail: st === 'corner' ? 'none' : 'edge', tl: tail, ink, lw, radius: (H + 2 * over) * 0.32, fill: c.fill,
       });
     } else {
       drawBubble(ctx, st, mx(near, bodyW), pad + m, bodyW, bodyH, {
-        side: right ? 'right' : 'left', tail: st === 'corner' ? 'none' : 'corner', tl: tail, ink, lw,
+        side: right ? 'right' : 'left', tail: st === 'corner' ? 'none' : 'corner', tl: tail, ink, lw, fill: c.fill,
       });
     }
-    ctx.fillStyle = ink;
+    ctx.fillStyle = c.text;
     const y = bleed ? pad : pad + m;
     const y0 = y + (bodyH - n * fs * lead) / 2 + fs * lead / 2;
     const [tx, al] = alignedX(L, mx(near, bodyW) + bx, bodyW - 2 * bx);
@@ -792,40 +897,227 @@ const BUBBLE2 = {
   },
 };
 
-// ---------- 수첩 (위쪽 스프링) ----------
+// ---------- 수첩 (가로: 위쪽 스프링 / 세로: 오른쪽 스프링 + 세로쓰기) ----------
 const NOTEBOOK = {
   layout(L, family) {
+    const vert = L.orientation === 'v';
     const lines = linesOf(L), n = Math.max(1, lines.length), lead = Math.max(1, L.leading);
     const T = L.tapeMm, pad = T * 0.08, ring = T * 0.16;
-    const areaH0 = T - pad - ring - pad * 1.2;
-    let fs = autoFs(L, areaH0 / (n * lead) * 0.78);
-    if (L.wrapMode !== 'grow') fs = Math.min(fs, areaH0 / (n * lead));
-    const areaH = Math.max(areaH0, n * fs * lead / 0.9);
+    const area0 = T - pad - ring - pad * 1.2;
+    if (vert) {
+      let fs = autoFs(L, area0 / (1 + (n - 1) * lead) * 0.78);
+      if (L.wrapMode !== 'grow') fs = Math.min(fs, area0 / (1 + (n - 1) * lead));
+      const charStep = fs * (1.05 + (L.tracking || 0) / 100);
+      const maxC = Math.max(1, ...lines.map(c => c.gs.length * c.k));
+      const by = Math.max(fs * 0.9, T * 0.12);
+      const H = L.lengthMode === 'fixed' ? L.lengthMm : Math.max(T * 1.6, 2 * pad + 2 * by + maxC * charStep);
+      return { special: 'notebook', vert, wMm: T, hMm: H, lines, n, lead, fs, pad, ring, by, charStep, maxC, T };
+    }
+    let fs = autoFs(L, area0 / (n * lead) * 0.78);
+    if (L.wrapMode !== 'grow') fs = Math.min(fs, area0 / (n * lead));
+    const areaH = Math.max(area0, n * fs * lead / 0.9);
     const H = areaH + pad + ring + pad * 1.2;
     const bx = Math.max(fs * 0.9, T * 0.12);
     const W = L.lengthMode === 'fixed' ? L.lengthMm : Math.max(T * 1.6, 2 * pad + 2 * bx + maxLineW(L, family, lines, fs));
-    return { special: 'notebook', wMm: W, hMm: H, lines, n, lead, fs, pad, ring, areaH, bx, T };
+    return { special: 'notebook', vert, wMm: W, hMm: H, lines, n, lead, fs, pad, ring, areaH, bx, T };
   },
   draw(ctx, L, family, Y, P) {
-    const { wMm: W, hMm: H, lines, n, lead, fs, pad, ring, bx, T } = Y;
+    const { wMm: W, hMm: H, lines, n, lead, fs, pad, T } = Y;
     const ink = L.inkColor, lw = Math.max(1 / P, T * 0.016);
-    const top = pad;
     ctx.strokeStyle = ink; ctx.lineWidth = lw;
-    ctx.strokeRect(pad, top, W - 2 * pad, H - pad - top);
-    // 스프링 구멍 + 고리
+    ctx.strokeRect(pad, pad, W - 2 * pad, H - 2 * pad);
+    // 스프링 구멍 + 고리 (가로: 위쪽 / 세로: 오른쪽)
+    const len = Y.vert ? H : W;
     const step = T * 0.16;
-    const count = Math.max(2, Math.floor((W - 2 * pad - step * 0.6) / step));
+    const count = Math.max(2, Math.floor((len - 2 * pad - step * 0.6) / step));
     const span = (count - 1) * step;
     ctx.fillStyle = ink;
     for (let i = 0; i < count; i++) {
-      const rx = W / 2 - span / 2 + i * step;
-      circle(ctx, rx, top + T * 0.1, T * 0.034); ctx.fill();
-      ctx.fillRect(rx - lw / 2, top, lw, T * 0.1);
+      const r = len / 2 - span / 2 + i * step;
+      if (Y.vert) {
+        circle(ctx, W - pad - T * 0.1, r, T * 0.034); ctx.fill();
+        ctx.fillRect(W - pad - T * 0.1, r - lw / 2, T * 0.1, lw);
+      } else {
+        circle(ctx, r, pad + T * 0.1, T * 0.034); ctx.fill();
+        ctx.fillRect(r - lw / 2, pad, lw, T * 0.1);
+      }
     }
-    const areaTop = top + T * 0.16, areaBot = H - pad;
+    ctx.fillStyle = ink;
+    if (Y.vert) {
+      const left = pad, right = W - pad - T * 0.16;
+      const textH = Y.maxC * Y.charStep;
+      vCols(ctx, L, family, lines, (left + right) / 2, (H - textH) / 2, fs, fs * lead, Y.charStep);
+      return;
+    }
+    const bx = Y.bx;
+    const areaTop = pad + T * 0.16, areaBot = H - pad;
     const y0 = areaTop + (areaBot - areaTop - n * fs * lead) / 2 + fs * lead / 2;
     const [tx, al] = alignedX(L, pad + bx, W - 2 * pad - 2 * bx);
     lines.forEach((l, i) => txt(ctx, L, family, l, tx, y0 + i * fs * lead, fs, al, W - 2 * pad - 2 * bx));
+  },
+};
+
+// ---------- 레이스 (가로: 위아래 / 세로: 좌우 + 세로쓰기) ----------
+// 가장자리(v=0)에서 안쪽(v=band)으로 레이스 한 줄. u = 길이 방향
+function laceBand(ctx, len, band, ink, lw) {
+  ctx.transform(1, 0, 0, -1, 0, band); // 바깥이 직선, 안쪽(글자 쪽)이 둥근 부분
+  const r0 = band * 0.4;
+  const cnt = Math.max(2, Math.round(len / (2 * r0)));
+  const r = len / cnt / 2, cy = band * 0.58;
+  // 레이스 바탕 (흰색)
+  ctx.beginPath();
+  ctx.moveTo(0, band);
+  ctx.lineTo(0, cy);
+  for (let i = 0; i < cnt; i++) ctx.arc((2 * i + 1) * r, cy, r, Math.PI, Math.PI * 2);
+  ctx.lineTo(len, band);
+  ctx.closePath();
+  ctx.fillStyle = '#ffffff'; ctx.fill();
+  ctx.strokeStyle = ink; ctx.lineWidth = lw; ctx.lineJoin = 'round'; ctx.stroke();
+  // 구멍 + 작은 점
+  ctx.fillStyle = ink;
+  for (let i = 0; i < cnt; i++) {
+    circle(ctx, (2 * i + 1) * r, cy, r * 0.34); ctx.lineWidth = lw * 0.9; ctx.stroke();
+    if (i > 0) { circle(ctx, 2 * i * r, cy + band * 0.2, r * 0.11); ctx.fill(); }
+  }
+  // 바느질 점선
+  ctx.save();
+  ctx.setLineDash([band * 0.09, band * 0.07]);
+  ctx.lineWidth = lw * 0.8;
+  ctx.beginPath(); ctx.moveTo(0, band * 0.9); ctx.lineTo(len, band * 0.9); ctx.stroke();
+  ctx.restore();
+}
+const LACE = {
+  layout(L, family) {
+    const vert = L.orientation === 'v';
+    const lines = linesOf(L), n = Math.max(1, lines.length), lead = Math.max(1, L.leading);
+    const T = L.tapeMm, band = T * 0.18, pad = T * 0.06;
+    const area0 = T - 2 * band - 2 * pad;
+    if (vert) {
+      let fs = autoFs(L, area0 / (1 + (n - 1) * lead) * 0.8);
+      if (L.wrapMode !== 'grow') fs = Math.min(fs, area0 / (1 + (n - 1) * lead));
+      const charStep = fs * (1.05 + (L.tracking || 0) / 100);
+      const maxC = Math.max(1, ...lines.map(c => c.gs.length * c.k));
+      const H = L.lengthMode === 'fixed' ? L.lengthMm : Math.max(T * 1.5, maxC * charStep + T * 0.3);
+      return { special: 'lace', vert, wMm: T, hMm: H, lines, n, lead, fs, band, charStep, maxC, T };
+    }
+    let fs = autoFs(L, area0 / (n * lead) * 0.85);
+    if (L.wrapMode !== 'grow') fs = Math.min(fs, area0 / (n * lead));
+    const areaH = Math.max(area0, n * fs * lead);
+    const H = areaH + 2 * band + 2 * pad;
+    const bx = T * 0.15;
+    const W = L.lengthMode === 'fixed' ? L.lengthMm : Math.max(T * 1.5, maxLineW(L, family, lines, fs) + 2 * bx);
+    return { special: 'lace', vert, wMm: W, hMm: H, lines, n, lead, fs, band, bx, T };
+  },
+  draw(ctx, L, family, Y, P) {
+    const { wMm: W, hMm: H, lines, n, lead, fs, band, T } = Y;
+    const ink = L.inkColor, lw = Math.max(1 / P, T * 0.012);
+    const sides = Y.vert
+      ? [[0, 1, 1, 0, 0, 0], [0, 1, -1, 0, W, 0]] // 왼쪽 / 오른쪽
+      : [[1, 0, 0, 1, 0, 0], [1, 0, 0, -1, 0, H]]; // 위 / 아래
+    sides.forEach(m => { ctx.save(); ctx.transform(...m); laceBand(ctx, Y.vert ? H : W, band, ink, lw); ctx.restore(); });
+    ctx.fillStyle = ink;
+    if (Y.vert) {
+      const textH = Y.maxC * Y.charStep;
+      vCols(ctx, L, family, lines, W / 2, (H - textH) / 2, fs, fs * lead, Y.charStep);
+      return;
+    }
+    const y0 = (H - n * fs * lead) / 2 + fs * lead / 2;
+    const [tx, al] = alignedX(L, Y.bx, W - 2 * Y.bx);
+    lines.forEach((l, i) => txt(ctx, L, family, l, tx, y0 + i * fs * lead, fs, al, W - 2 * Y.bx));
+  },
+};
+
+// ---------- 바탕화면 아이콘 ("절대 바이러스 아닙니다") ----------
+const VIRUS = {
+  layout(L, family) {
+    const lines = linesOf(L), n = Math.max(1, lines.length), lead = Math.max(1, L.leading);
+    const T = L.tapeMm, pad = T * 0.07;
+    const ic = T * 0.42, gap = T * 0.035;
+    let fs = autoFs(L, T * 0.1);
+    const bx = fs * 0.35, by = fs * 0.25;
+    const maxBox = T * 1.6 - 2 * pad;
+    let tw = maxLineW(L, family, lines, fs);
+    if (L.sizeMode !== 'manual' && tw + 2 * bx > maxBox) { fs *= (maxBox - 2 * bx) / tw; tw = maxLineW(L, family, lines, fs); }
+    const boxW = Math.max(ic * 1.2, tw + 2 * bx), boxH = n * fs * lead + 2 * by;
+    const W = Math.max(T, boxW + 2 * pad);
+    const H = pad + ic + gap + boxH + pad;
+    return { special: 'virus', wMm: W, hMm: H, lines, n, lead, fs, pad, ic, gap, bx, by, boxW, boxH, T };
+  },
+  draw(ctx, L, family, Y, P) {
+    const { wMm: W, lines, n, lead, fs, pad, ic, gap, boxW, boxH, T } = Y;
+    const ink = L.inkColor, inv = L.invColor || '#ffffff';
+    const ix = (W - ic) / 2, iy = pad;
+    // 아이콘 그림: 사진 > DECO 아이콘 > 기본
+    const im = L.photo ? getImg(L.photo) : null;
+    if (im) {
+      const s = Math.max(ic / im.naturalWidth, ic / im.naturalHeight);
+      const dw = im.naturalWidth * s, dh = im.naturalHeight * s;
+      ctx.save(); ctx.beginPath(); ctx.rect(ix, iy, ic, ic); ctx.clip();
+      ctx.drawImage(im, ix + (ic - dw) / 2, iy + (ic - dh) / 2, dw, dh);
+      ctx.restore();
+    } else {
+      iconAt(ctx, P, L.hero?.icon || 'face', ix, iy, ic, ic, ink);
+    }
+    // 바로가기 화살표 배지
+    const b = ic * 0.3, bx0 = ix - b * 0.05, by0 = iy + ic - b * 0.95;
+    const lw = Math.max(1 / P, b * 0.07);
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(bx0, by0, b, b);
+    ctx.strokeStyle = '#8a8a8a'; ctx.lineWidth = lw * 0.8; ctx.strokeRect(bx0, by0, b, b);
+    ctx.strokeStyle = '#111111'; ctx.lineWidth = lw * 1.5; ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(bx0 + b * 0.28, by0 + b * 0.8);
+    ctx.quadraticCurveTo(bx0 + b * 0.3, by0 + b * 0.35, bx0 + b * 0.68, by0 + b * 0.32);
+    ctx.stroke();
+    ctx.fillStyle = '#111111';
+    ctx.beginPath();
+    ctx.moveTo(bx0 + b * 0.82, by0 + b * 0.3); ctx.lineTo(bx0 + b * 0.56, by0 + b * 0.14); ctx.lineTo(bx0 + b * 0.58, by0 + b * 0.5);
+    ctx.closePath(); ctx.fill();
+    ctx.lineCap = 'butt';
+    // 이름 칸 (선택된 아이콘처럼 칠해진 상자)
+    const tx0 = (W - boxW) / 2, ty0 = iy + ic + gap;
+    ctx.fillStyle = ink; ctx.fillRect(tx0, ty0, boxW, boxH);
+    ctx.fillStyle = inv;
+    const y0 = ty0 + (boxH - n * fs * lead) / 2 + fs * lead / 2;
+    lines.forEach((l, i) => txt(ctx, L, family, l, W / 2, y0 + i * fs * lead, fs, 'center', boxW - Y.bx * 2));
+  },
+};
+
+// ---------- 강조 말풍선 (삐죽삐죽) ----------
+const BURST = {
+  layout(L, family) {
+    const lines = linesOf(L), n = Math.max(1, lines.length), lead = Math.max(1, L.leading);
+    const T = L.tapeMm, pad = T * 0.05;
+    let ryO = (T / 2 - pad) / 1.12;
+    let fs = autoFs(L, ryO * 0.72 * 1.5 / (n * lead));
+    const blockH = n * fs * lead;
+    ryO = Math.max(ryO, blockH / 2 / 0.72 / 0.75);
+    const tw = maxLineW(L, family, lines, fs);
+    const rxO = Math.max((tw / 2 + fs * 0.6) / 0.72, ryO * 1.5);
+    const H = Math.max(T, 2 * ryO * 1.12 + 2 * pad);
+    const W = L.lengthMode === 'fixed' ? L.lengthMm : Math.max(T * 1.4, 2 * rxO * 1.12 + 2 * pad);
+    return { special: 'burst', wMm: W, hMm: H, lines, n, lead, fs, rxO, ryO, T };
+  },
+  draw(ctx, L, family, Y, P) {
+    const { wMm: W, hMm: H, lines, n, lead, fs, ryO, T } = Y;
+    const rxO = Math.min(Y.rxO, (W / 2 - T * 0.05) / 1.12);
+    const cx = W / 2, cy = H / 2;
+    const per = Math.PI * (rxO + ryO);
+    const N = Math.max(14, Math.min(40, Math.round(per / (T * 0.13))));
+    const rnd = i => { const v = Math.sin(i * 12.9898 + 4.1) * 43758.5453; return v - Math.floor(v); };
+    ctx.beginPath();
+    for (let i = 0; i < N * 2; i++) {
+      const a = (i + (rnd(i + 99) - 0.5) * 0.35) / (N * 2) * Math.PI * 2 - Math.PI / 2;
+      const f = i % 2 === 0 ? 1 + (rnd(i) - 0.5) * 0.22 : 0.74 + (rnd(i) - 0.5) * 0.06;
+      const x = cx + Math.cos(a) * rxO * f, y = cy + Math.sin(a) * ryO * f;
+      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    }
+    ctx.closePath();
+    ctx.fillStyle = L.inkColor; ctx.fill();
+    ctx.lineJoin = 'miter';
+    ctx.fillStyle = L.invColor || '#ffffff';
+    const y0 = cy - n * fs * lead / 2 + fs * lead / 2;
+    const maxW = rxO * 0.72 * 2 - fs * 0.6;
+    lines.forEach((l, i) => txt(ctx, L, family, l, cx, y0 + i * fs * lead, fs, 'center', maxW));
   },
 };
 
@@ -833,8 +1125,8 @@ const NOTEBOOK = {
 const OMAMORI = {
   layout(L, family) {
     if (L.omamori?.style === 'charm') return OMAMORI2.layout(L, family);
-    const cols = linesOf(L).map(l => graphemes(l)), n = Math.max(1, cols.length);
-    const maxC = Math.max(1, ...cols.map(c => c.length));
+    const cols = linesOf(L), n = Math.max(1, cols.length);
+    const maxC = Math.max(1, ...cols.map(c => c.gs.length * c.k));
     const T = L.tapeMm, pad = T * 0.1, knot = T * 0.42, inset = T * 0.1;
     const innerW = T - 2 * pad - 2 * inset;
     const lead = Math.max(1, L.leading);
@@ -857,13 +1149,8 @@ const OMAMORI = {
     const top = y + inset + T * 0.14;
     const avail = h - inset * 2 - T * 0.26 - charm;
     const off = Math.max(0, (avail - textH) / 2);
-    const startX = cx + (n - 1) * colStep / 2;
-    ctx.fillStyle = ink; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.font = fontStr(L, family, fs);
-    cols.forEach((col, i) => {
-      const colX = startX - i * colStep;
-      col.forEach((ch, k) => ctx.fillText(ch, colX, top + off + k * charStep + charStep / 2));
-    });
+    ctx.fillStyle = ink;
+    vCols(ctx, L, family, cols, cx, top + off, fs, colStep, charStep);
     // 아래 부적 장식
     const icon = L.hero?.icon || 'clover';
     iconAt(ctx, P, icon, cx - charm / 2, y + h - inset - T * 0.06 - charm, charm, charm, ink);
@@ -897,11 +1184,11 @@ function omamoriShell(ctx, W, H, pad, knot, bodyTop, T, ink, P) {
 // 오마모리 2: 가운데 큰 그림 + 아래 가로 글씨
 const OMAMORI2 = {
   layout(L, family) {
-    const lines = linesOf(L).filter((l, i, a) => l.length || a.length === 1), n = Math.max(1, lines.length);
+    const lines = linesOf(L).filter((l, i, a) => l.text.length || a.length === 1), n = Math.max(1, lines.length);
     const T = L.tapeMm, pad = T * 0.1, knot = T * 0.42, inset = T * 0.12;
     const innerW = T - 2 * pad - 2 * inset;
     const lead = Math.max(1, L.leading);
-    const hasText = lines.some(l => l.trim());
+    const hasText = lines.some(l => l.text.trim());
     const icon = L.hero?.icon || 'clover';
     const { w, h } = iconSize(icon);
     const imgW = innerW * 0.9, imgH = (w && h) ? Math.min(imgW * h / w, innerW * 1.3) : imgW;
@@ -929,5 +1216,5 @@ const OMAMORI2 = {
   },
 };
 
-const SPECIAL = { music: MUSIC, messenger: MESSENGER, dogtag: DOGTAG, wongoji: WONGOJI, bubble: BUBBLE, bubble2: BUBBLE2, omamori: OMAMORI, notebook: NOTEBOOK };
+const SPECIAL = { music: MUSIC, messenger: MESSENGER, dogtag: DOGTAG, wongoji: WONGOJI, bubble: BUBBLE, bubble2: BUBBLE2, omamori: OMAMORI, notebook: NOTEBOOK, lace: LACE, virus: VIRUS, burst: BURST };
 export const isSpecialFrame = f => !!SPECIAL[f];

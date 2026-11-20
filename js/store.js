@@ -44,7 +44,9 @@ export const TAPE_WIDTHS = [4, 6, 9, 12, 18, 24, 36];
 export function defaultLabel() {
   return {
     id: uid(),
-    text: '오늘도 수고했어',
+    text: '세상 속에서 우리들도 만남인 걸\n밤새워 침묵을 부르자',
+    marks: {},             // 드래그 구간 스타일 { bold: [[s,e]], ... }
+    lineSizes: [],         // 줄별 크기 l(크게=자동) | m | s
     orientation: 'h',      // h | v | square | free
     tapeMm: 12,
     lengthMode: 'auto',    // auto | fixed
@@ -52,26 +54,28 @@ export function defaultLabel() {
     freeW: 40, freeH: 20,
     wrapMode: 'shrink',    // shrink(폭 고정, 글자 축소) | grow(높이 늘림)
     padX: 2.5, padY: 1.5,  // mm
-    fontId: 'galmuri11',
+    fontId: 'chosungu',
     sizeMode: 'auto',      // auto | manual
     sizePt: 14,
     tracking: 0,           // em의 1/100
     leading: 1.2,
     widthScale: 100,       // %
-    bold: false, italic: false, underline: false, strike: false, outline: false,
+    bold: false, italic: false, underline: false, strike: false, outline: false, hl: false,
     align: 'center',       // left | center | right | justify
     frame: 'none',         // none | solid | dotted | double
     pattern: 'none',       // none | check | stripe | dot | diag
-    deco: { left: 'bear', right: 'bone', top: null, bottom: null },
+    deco: { left: 'note', right: null, top: null, bottom: null },
     decoRepeat: false,     // 가장자리 장식 반복
     decoScale: 1,          // 장식 크기 배율
     music: { cur: '2:25', remain: '-0:38', progress: 0.8 },
     messenger: { start: 'left' }, // 첫 말풍선: left(상대) | right(나)
-    bubble: { style: 'round', tail: 'corner', charSide: 'left', bleed: false },
-    omamori: { style: 'vertical' }, // vertical(세로 글씨) | charm(그림 + 가로 글씨)   // 말풍선: round(심플) | corner(모서리 뾰족) | cloud(구름)
+    bubble: { style: 'round', tail: 'corner', charSide: 'left', bleed: false, fill: false },
+    omamori: { style: 'vertical' }, // vertical(세로 글씨) | charm(그림 + 가로 글씨)
+    photo: null,           // 바탕화면 아이콘 프레임 사진 (dataURL)
     hero: { icon: null, textPos: 'bottom', size: 0.62 }, // 메인 그림
     tapeColor: '#F6EBA6',
     inkColor: '#2F2C30',
+    invColor: '#FFFFFF',   // 반전 글씨 (배경색·채운 말풍선 위 글자)
     emojiMono: true,
   };
 }

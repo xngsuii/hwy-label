@@ -125,7 +125,7 @@ input[type=range]{flex:1;min-width:60px;accent-color:var(--ink);height:14px}
 .pv{background-color:var(--paper);background-image:radial-gradient(var(--pink-2) 1px,transparent 1.4px);background-size:7px 7px;
   height:160px;display:grid;place-items:center;position:relative;border-bottom:1px solid var(--line);overflow:hidden;padding:24px 12px 18px}
 .pv canvas{max-width:286px;max-height:116px;width:auto;height:auto;filter:drop-shadow(1px 2px 0 rgba(0,0,0,.25))}
-.pv .dim{position:absolute;top:6px;left:8px;font-size:10px;letter-spacing:.08em}
+.pv .dim{position:absolute;top:6px;left:8px;font-size:10px;letter-spacing:.08em;font-weight:700}
 .pv .ruler{position:absolute;left:10px;right:10px;bottom:5px;height:7px;background:repeating-linear-gradient(90deg,var(--ink) 0 1px,transparent 1px 6px);opacity:.45}
 .put{display:flex;gap:6px;padding:8px 10px}
 .put .btn{flex:1;padding:6px}
@@ -216,3 +216,22 @@ input[type=range]{flex:1;min-width:60px;accent-color:var(--ink);height:14px}
   .side.l > .fixed{position:sticky;top:0;background:var(--white)}
   .center{min-height:420px}
 }
+
+/* 텍스트 편집: 줄 번호 + 줄별 크기 */
+.ed{display:flex;gap:4px;align-items:flex-start}
+.ed textarea.main{flex:1;min-width:0;resize:none;line-height:20px;white-space:pre;overflow-x:auto}
+.ed-no{overflow:hidden;flex:none;padding-top:7.5px;box-sizing:border-box}
+.ed-no{font-size:12px;width:16px;text-align:center;color:var(--ink-2)}
+.ed-row{height:20px;display:flex;align-items:center;justify-content:center;gap:1px}
+.btn.sq.part{box-shadow:inset 0 -3px 0 var(--pink-2)}
+.pager{display:flex;justify-content:center;gap:3px;margin-top:6px}
+.pager button{min-width:20px;height:20px;border:1.5px solid var(--line);background:var(--white);font-size:10px;cursor:pointer;font-family:inherit;padding:0 4px}
+.pager button.on{background:var(--ink);color:var(--white)}
+.pager button:disabled{opacity:.35;cursor:default}
+.ed-row.ln{cursor:pointer}
+.ed-row.ln:hover{color:var(--ink)}
+.ed-row.ln.on{background:var(--ink);color:var(--white)}
+.ln-cur{font-size:13px;width:18px;text-align:center}
+.item.picked{outline:2px dashed var(--pink);outline-offset:2px}
+.lib.big{grid-template-columns:repeat(3,1fr)}
+.lib.big img{width:86%;height:86%;object-fit:contain}
