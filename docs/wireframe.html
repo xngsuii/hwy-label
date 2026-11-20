@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hwy-label wireframe</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DotGothic16&family=Courier+Prime:wght@400;700&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/galmuri/dist/galmuri.css" rel="stylesheet">
+<style>
+:root{
+  --pink:#DDB9C8; --pink-2:#CFA5B8; --pink-3:#F1E2E8;
+  --white:#FFFDFD; --paper:#F6F0F2;
+  --ink:#2F2C30; --ink-2:#6B6469; --line:#2F2C30;
+  --ui:'Courier Prime','Galmuri11',monospace;
+  --px:'Galmuri11','DotGothic16',monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{
+  background-color:var(--pink);
+  /* cross-stitch X pattern */
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12'%3E%3Cpath d='M3 3l6 6M9 3l-6 6' stroke='%23ffffff' stroke-opacity='.28' stroke-width='1.2'/%3E%3C/svg%3E");
+  color:var(--ink); font-family:var(--ui); font-size:12px;
+  min-width:1180px;
+}
+.top{display:flex;justify-content:space-between;align-items:baseline;padding:18px 28px 10px;
+  font-family:'DotGothic16',monospace;letter-spacing:.18em;color:var(--white);font-size:15px;text-shadow:1px 1px 0 var(--pink-2)}
+.top b{font-weight:400;font-size:20px}
+.win{margin:0 28px;background:var(--white);border:1.5px solid var(--line);box-shadow:5px 5px 0 rgba(47,44,48,.25)}
+.winbar{border-bottom:1.5px solid var(--line);padding:5px 10px;font-size:11px;letter-spacing:.14em;text-transform:uppercase;display:flex;justify-content:space-between;
+  background:repeating-linear-gradient(0deg,var(--white) 0 2px,var(--pink-3) 2px 3px)}
+.grid{display:grid;grid-template-columns:300px 1fr 270px;min-height:820px}
+.side{border-right:1.5px solid var(--line);overflow:auto;max-height:900px}
+.side.r{border-right:0;border-left:1.5px solid var(--line)}
+.sec{border-bottom:1.5px solid var(--line)}
+.h{font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;padding:4px 8px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;background:var(--white)}
+.h i{font-style:normal;color:var(--ink-2)}
+.body{padding:10px}
+.row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+.row:last-child{margin-bottom:0}
+.lbl{width:52px;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-2)}
+.btn{border:1.5px solid var(--line);background:var(--white);font-family:var(--ui);font-size:11px;padding:3px 8px;cursor:pointer;letter-spacing:.08em}
+.btn.on{background:var(--ink);color:var(--white)}
+.btn.sq{width:26px;height:24px;padding:0;display:inline-grid;place-items:center}
+.pill{border:1.5px solid var(--line);border-radius:999px;background:#E9E5E7;padding:4px 14px;font-family:var(--ui);font-size:11px;display:inline-block}
+.chip{border:1px solid var(--line);padding:2px 6px;font-size:11px;background:var(--white);cursor:pointer}
+.chip.on{background:var(--pink);}
+textarea{width:100%;height:58px;border:1.5px solid var(--line);font-family:var(--px);font-size:13px;padding:6px;resize:none;background:var(--paper)}
+input[type=range]{flex:1;accent-color:var(--ink);height:14px}
+.val{width:34px;text-align:right;font-size:10px}
+.tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:4px}
+.tile{border:1.5px solid var(--line);aspect-ratio:1.25;display:grid;place-items:center;font-size:9.5px;text-align:center;line-height:1.15;background:var(--white);cursor:pointer;padding:2px;font-family:var(--px)}
+.tile.on{outline:2px solid var(--ink);outline-offset:1px;background:var(--pink-3)}
+.lib{display:grid;grid-template-columns:repeat(6,1fr);background:var(--ink);gap:1px;border:1.5px solid var(--line)}
+.lib div{aspect-ratio:1;display:grid;place-items:center;background:var(--ink)}
+.lib div.on{background:var(--pink-2)}
+/* preview */
+.pv{background-color:var(--paper);
+  background-image:radial-gradient(var(--pink-2) 1px,transparent 1.4px);background-size:7px 7px;
+  height:150px;display:grid;place-items:center;position:relative;border-bottom:1px solid var(--line)}
+.ruler{position:absolute;left:10px;right:10px;bottom:6px;height:8px;
+  background:repeating-linear-gradient(90deg,var(--ink) 0 1px,transparent 1px 6px);opacity:.5}
+.dim{position:absolute;top:6px;left:8px;font-size:10px;letter-spacing:.1em}
+.put{display:flex;gap:6px;padding:8px 10px}
+.put .btn{flex:1;padding:6px}
+.put .btn.main{background:var(--pink);font-weight:700}
+.dpad{display:grid;grid-template-columns:repeat(3,28px);grid-template-rows:repeat(3,24px);gap:2px}
+.dpad span{border:1.5px solid var(--line);display:grid;place-items:center;font-size:10px;background:var(--white)}
+.dpad span.on{background:var(--pink)}
+.dpad span.c{border-style:dashed;font-size:8px}
+.kao{display:flex;flex-wrap:wrap;gap:4px}
+.kao span{border:1px solid var(--line);padding:2px 5px;font-family:var(--px);font-size:11px;background:var(--white)}
+.toggle{display:inline-flex;border:1.5px solid var(--line)}
+.toggle span{padding:2px 8px;font-size:10px}
+.toggle span.on{background:var(--ink);color:var(--white)}
+/* center board */
+.center{display:flex;flex-direction:column;background:var(--paper)}
+.tb{display:flex;gap:6px;padding:7px 10px;border-bottom:1.5px solid var(--line);align-items:center;background:var(--white)}
+.tb .sp{flex:1}
+.board-wrap{flex:1;display:grid;place-items:center;padding:24px}
+.board{width:620px;height:620px;position:relative;overflow:hidden;border:1.5px solid var(--line);
+  background-color:#252327;
+  background-image:linear-gradient(rgba(255,255,255,.18) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.18) 1px,transparent 1px),
+                   linear-gradient(rgba(255,255,255,.07) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.07) 1px,transparent 1px);
+  background-size:62px 62px,62px 62px,15.5px 15.5px,15.5px 15.5px;
+  box-shadow:4px 4px 0 rgba(47,44,48,.2)}
+.hint{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-2);padding:0 0 12px;text-align:center}
+/* labels */
+.L{position:absolute;font-family:var(--px);color:var(--ink);display:flex;align-items:center;gap:7px;padding:6px 10px;white-space:nowrap;
+  box-shadow:1px 2px 0 rgba(0,0,0,.35)}
+.L.sel{outline:1.5px dashed #fff;outline-offset:5px}
+.L.sel::before,.L.sel::after{content:"";position:absolute;width:7px;height:7px;background:#fff;border:1px solid var(--ink)}
+.L.sel::before{left:-9px;top:-9px}.L.sel::after{right:-9px;bottom:-9px}
+.rot{position:absolute;left:50%;top:-26px;width:9px;height:9px;border-radius:50%;background:#fff;border:1px solid var(--ink);transform:translateX(-50%)}
+.inner-dot{border:1.5px dotted var(--ink);padding:3px 8px}
+.y{background:#F6EBA6}.w{background:#FFFEFB}.g{background:#CFE6B8}.p{background:#F5CFDD}.k{background:#1F1D20;color:#fff}.b{background:#D5E6F3}
+.gingham{background-color:#F5CFDD;background-image:linear-gradient(90deg,rgba(255,255,255,.55) 50%,transparent 50%),linear-gradient(rgba(255,255,255,.55) 50%,transparent 50%);background-size:8px 8px}
+.stripe{background-image:repeating-linear-gradient(90deg,transparent 0 5px,rgba(47,44,48,.12) 5px 7px)}
+.diag{background-image:repeating-linear-gradient(45deg,transparent 0 4px,rgba(47,44,48,.13) 4px 5px)}
+.dots{background-image:radial-gradient(rgba(47,44,48,.25) 1px,transparent 1.3px);background-size:5px 5px}
+.scallop{border:2px solid var(--ink);border-radius:14px;outline:2px dotted var(--ink);outline-offset:-6px}
+.vert{writing-mode:vertical-rl;letter-spacing:.1em}
+.wongo{display:grid;grid-auto-flow:column;gap:0;border:1.5px solid #C77;padding:0}
+.wongo span{width:20px;height:22px;border-right:1px solid #C77;display:grid;place-items:center;font-size:12px}
+.wongo span:last-child{border-right:0}
+.bubble{position:relative;background:#fff;border:1.5px solid var(--ink);border-radius:10px;padding:3px 8px;font-size:11px}
+.bubble.me{background:var(--ink);color:#fff}
+.tag{border-radius:12px;border:1.5px solid #888;background:linear-gradient(135deg,#E9E9EC,#BDBDC3);font-family:'GalmuriMono11','Courier Prime',monospace;font-size:10.5px;line-height:1.35;padding:7px 12px 7px 26px;display:block}
+.tag::before{content:"";position:absolute;left:9px;top:50%;width:9px;height:9px;border-radius:50%;border:1.5px solid #777;background:#252327;transform:translateY(-50%)}
+.player{display:flex;flex-direction:column;gap:3px;padding:6px 10px;align-items:stretch}
+.bar{height:3px;background:rgba(255,255,255,.35);position:relative}
+.bar::after{content:"";position:absolute;left:0;top:0;bottom:0;width:38%;background:#fff}
+.bar i{position:absolute;left:38%;top:-3px;width:9px;height:9px;background:#fff;transform:translateX(-50%)}
+/* right */
+.drawer{display:grid;grid-template-columns:1fr;gap:5px;max-height:250px;overflow:auto}
+.dr{display:flex;align-items:center;gap:6px;border:1px solid var(--line);padding:4px;background:var(--white)}
+.dr input{margin:0;accent-color:var(--ink)}
+.dr .th{flex:1;height:22px;display:flex;align-items:center;padding:0 6px;font-family:var(--px);font-size:10px;overflow:hidden;white-space:nowrap;border:1px solid rgba(0,0,0,.15)}
+.dr em{font-style:normal;font-size:9px;color:var(--ink-2);width:34px;text-align:right}
+.bgs{display:grid;grid-template-columns:repeat(5,1fr);gap:4px}
+.bgs div{aspect-ratio:1;border:1.5px solid var(--line)}
+.bgs div.on{outline:2px solid var(--ink);outline-offset:1px}
+.pal{display:flex;gap:5px}
+.pal div{width:30px;height:30px;border:1.5px solid var(--line);position:relative}
+.pal div.add{display:grid;place-items:center;border-style:dashed;font-size:14px}
+.status{display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 10px;text-align:center;font-family:var(--px);font-size:11px}
+.printbox{padding:10px}
+.print{width:100%;border:2px solid var(--ink);background:var(--pink);font-family:'DotGothic16',monospace;font-size:22px;letter-spacing:.14em;padding:6px 0 5px;cursor:pointer;
+  box-shadow:3px 3px 0 var(--ink);position:relative}
+.print:hover{background:var(--pink-2)}
+.print:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--ink)}
+.side.l{display:flex;flex-direction:column;overflow:hidden;height:900px;max-height:none}
+.side.l > .sec.fixed{flex:none;box-shadow:0 3px 0 rgba(47,44,48,.12);position:relative;z-index:2}
+.side.l > .scroll{flex:1;overflow:auto}
+.saved{display:inline-flex;align-items:center;gap:5px}
+.saved::before{content:"";width:6px;height:6px;background:#6FA06A;display:inline-block}
+.trans{background-color:#fff;background-image:linear-gradient(45deg,#ddd 25%,transparent 25%,transparent 75%,#ddd 75%),linear-gradient(45deg,#ddd 25%,transparent 25%,transparent 75%,#ddd 75%);background-size:8px 8px;background-position:0 0,4px 4px}
+.opts label{display:flex;align-items:center;gap:6px;margin-bottom:4px;font-size:11px}
+.opts input{accent-color:var(--ink);margin:0}
+.nav{text-align:center;padding:18px 0 6px;font-family:'DotGothic16',monospace;letter-spacing:.2em;color:var(--white);font-size:13px}
+.nav span{margin:0 18px}.nav span.on{text-decoration:underline;text-underline-offset:4px}
+.sub{text-align:center;font-size:9px;letter-spacing:.25em;color:var(--white);opacity:.85;padding-bottom:26px}
+.sub span{margin:0 16px}
+.note{position:absolute;background:#FFF7A8;border:1px solid var(--ink);font-family:var(--px);font-size:10.5px;padding:4px 7px;max-width:180px;transform:rotate(-2deg);z-index:5;box-shadow:2px 2px 0 rgba(0,0,0,.2)}
+.px{display:inline-block;vertical-align:middle;line-height:0}
+</style>
+</head>
+<body>
+
+<div class="top"><b>LABEL MAKER</b><span>HWY · ALPHA 0.1</span></div>
+
+<div class="win">
+  <div class="winbar"><span>Editor view · label #07 · editing</span><span class="saved">autosaved · 로컬 저장됨 &nbsp;·&nbsp; drawer 8 · board 1080×1080</span></div>
+  <div class="grid">
+
+    <!-- ============ LEFT: MAKE ============ -->
+    <aside class="side l">
+      <div class="sec fixed">
+        <div class="h">Preview <i>현재 라벨 · 고정</i></div>
+        <div class="pv">
+          <span class="dim">18mm × 52mm · 가로형</span>
+          <div class="L y" style="position:static;font-size:15px;padding:8px 12px">
+            <span class="px" data-px="bear" data-s="2"></span>
+            <span class="inner-dot">오늘도 수고했어</span>
+            <span class="px" data-px="bone" data-s="2"></span>
+          </div>
+          <div class="ruler"></div>
+        </div>
+        <div class="put">
+          <button class="btn">↺ 새로</button>
+          <button class="btn main">서랍에 넣기 ↘</button>
+        </div>
+      </div>
+      <div class="scroll">
+
+      <div class="sec">
+        <div class="h">Text <i>텍스트</i></div>
+        <div class="body">
+          <textarea>오늘도 수고했어</textarea>
+          <div class="row" style="margin-top:8px"><span class="pill">갈무리11 ▾</span><span class="pill">14pt ▾</span></div>
+          <div class="row">
+            <button class="btn sq on"><b>B</b></button><button class="btn sq"><i>I</i></button><button class="btn sq"><u>U</u></button><button class="btn sq"><s>S</s></button><button class="btn sq" style="-webkit-text-stroke:1px var(--ink);color:#fff;font-weight:700">O</button>
+            <span style="width:6px"></span>
+            <button class="btn sq">⇤</button><button class="btn sq on">≡</button><button class="btn sq">⇥</button><button class="btn sq">☰</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="h">Size <i>크기 · 방향</i></div>
+        <div class="body">
+          <div class="row"><span class="lbl">방향</span><button class="btn on">가로</button><button class="btn">세로</button><button class="btn">정방</button><button class="btn">자유</button></div>
+          <div class="row"><span class="lbl">테이프</span>
+            <span class="chip">4</span><span class="chip">6</span><span class="chip">9</span><span class="chip">12</span><span class="chip on">18</span><span class="chip">24</span><span class="chip">36</span><span class="chip">50</span><span style="font-size:10px">mm</span></div>
+          <div class="row"><span class="lbl">길이</span><span class="pill">자동 ▾</span><span style="font-size:10px">52mm</span><span style="font-size:10px;color:var(--ink-2)">🔒고정</span></div>
+          <div class="row"><span class="lbl">줄바꿈</span><span class="toggle"><span class="on">폭 고정·글자 축소</span><span>높이 늘림</span></span></div>
+          <div class="row"><span class="lbl">여백 ↔</span><input type="range" value="40"><span class="val">3mm</span></div>
+          <div class="row"><span class="lbl">여백 ↕</span><input type="range" value="20"><span class="val">1.5mm</span></div>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="h">Type <i>자간 · 행간 · 장평</i></div>
+        <div class="body">
+          <div class="row"><span class="lbl">자간</span><input type="range" value="50"><span class="val">0</span></div>
+          <div class="row"><span class="lbl">행간</span><input type="range" value="40"><span class="val">1.2</span></div>
+          <div class="row"><span class="lbl">장평</span><input type="range" value="60"><span class="val">100%</span></div>
+          <div class="row"><span class="pill">프리셋: 기본 ▾</span><button class="btn">+ 저장</button></div>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="h">Frame <i>프레임</i></div>
+        <div class="body">
+          <div class="tiles" style="margin-bottom:6px">
+            <div class="tile">없음</div>
+            <div class="tile"><span style="border:1.5px solid;padding:2px 6px">실선</span></div>
+            <div class="tile on"><span style="border:1.5px dotted;padding:2px 6px">점선</span></div>
+            <div class="tile"><span style="border:3px double;padding:1px 5px">이중</span></div>
+          </div>
+          <div class="h" style="border:0;padding:4px 0">Special</div>
+          <div class="tiles">
+            <div class="tile">▶❚❚<br>뮤직</div>
+            <div class="tile">💬<br>메신저</div>
+            <div class="tile">◉▭<br>도그태그</div>
+            <div class="tile">▦<br>원고지</div>
+            <div class="tile">◖ ◗<br>말풍선</div>
+            <div class="tile"><span class="px" data-px="bear" data-s="1"></span>말풍선<br>(캐릭터)</div>
+            <div class="tile">⛩<br>오마모리</div>
+            <div class="tile" style="border-style:dashed;color:var(--ink-2)">+ 추가<br>예정</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="h">Pattern <i>배경 무늬</i></div>
+        <div class="body">
+          <div class="tiles" style="grid-template-columns:repeat(5,1fr)">
+            <div class="tile on">없음</div>
+            <div class="tile gingham"></div>
+            <div class="tile stripe"></div>
+            <div class="tile dots"></div>
+            <div class="tile diag"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="h">Deco <i>장식 · 상하좌우</i></div>
+        <div class="body">
+          <div class="row" style="align-items:flex-start;gap:12px">
+            <div class="dpad">
+              <span></span><span>↑</span><span></span>
+              <span class="on">←</span><span class="c">TEXT</span><span class="on">→</span>
+              <span></span><span>↓</span><span></span>
+            </div>
+            <div style="flex:1;font-size:10px;line-height:1.5">슬롯 선택 → 아래에서 아이콘 클릭<br><b>← 곰</b> · <b>→ 뼈다귀</b><br><span style="color:var(--ink-2)">기본: 좌우 양쪽</span></div>
+          </div>
+          <div class="row"><span class="pill">pick category ▾</span><span style="font-size:10px">동물</span></div>
+          <div class="lib" id="lib"></div>
+          <div class="row" style="margin-top:8px">
+            <button class="btn">📷 이미지 → 비트맵</button>
+            <span class="pill">하프톤 ▾</span>
+          </div>
+          <div class="row" style="gap:4px">
+            <span style="font-size:9px;color:var(--ink-2)">미리보기:</span>
+            <span style="width:34px;height:34px;border:1px solid var(--ink);background:radial-gradient(var(--ink) 35%,transparent 40%) 0 0/4px 4px,var(--white);display:inline-block;mask:radial-gradient(circle,#000 60%,transparent 62%);-webkit-mask:radial-gradient(circle,#000 60%,transparent 62%)"></span>
+            <span style="width:34px;height:34px;display:inline-block;background:repeating-conic-gradient(var(--ink) 0 25%,var(--white) 0 50%) 0 0/4px 4px;opacity:.85;border:1px solid var(--ink)"></span>
+            <span style="font-size:9px;color:var(--ink-2)">점 / 디더 · 임계값 슬라이더</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="h">Emoji <i>이모지 · 이모티콘</i></div>
+        <div class="body">
+          <div class="row"><span class="lbl">이모지</span><span class="toggle"><span class="on">흑백 변환</span><span>컬러 유지</span></span></div>
+          <div class="kao">
+            <span>ʕ•ᴥ•ʔ</span><span>(｡•́︿•̀｡)</span><span>(˘ω˘)</span><span>♡</span><span>☆</span><span>✿</span><span>( ˙꒳˙ )</span><span>…</span><span>⸝⸝</span><span style="border-style:dashed">+ 즐겨찾기</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="sec" style="border-bottom:0">
+        <div class="h">Color <i>판 팔레트에서</i></div>
+        <div class="body">
+          <div class="row"><span class="lbl">테이프</span><span class="pal" id="palA"></span></div>
+          <div class="row"><span class="lbl">잉크</span><span class="pal"><div style="background:#2F2C30;outline:2px solid var(--ink);outline-offset:1px"></div><div style="background:#B5475E"></div><div style="background:#2E4C9A"></div><div style="background:#fff"></div></span></div>
+        </div>
+      </div>
+      </div><!-- /scroll -->
+    </aside>
+
+    <!-- ============ CENTER: BOARD ============ -->
+    <main class="center">
+      <div class="tb">
+        <button class="btn on">자동배치</button>
+        <button class="btn">흩뿌리기</button>
+        <button class="btn">정렬 ▾</button>
+        <span style="width:8px"></span>
+        <button class="btn sq">⟲</button><button class="btn sq">⤒</button><button class="btn sq">⤓</button>
+        <span class="sp"></span>
+        <span style="font-size:10px;letter-spacing:.1em">ZOOM</span><button class="btn sq">−</button><span style="font-size:11px">75%</span><button class="btn sq">+</button>
+      </div>
+      <div class="board-wrap">
+        <div>
+          <div class="hint">board · 판 미리보기 — 드래그 이동 / 핸들로 회전·크기</div>
+          <div class="board" id="board">
+
+            <div class="L y" style="left:40px;top:50px;font-size:14px;transform:rotate(-4deg)">
+              <span class="px" data-px="bear" data-s="2"></span><span class="inner-dot">오늘도 수고했어</span><span class="px" data-px="bone" data-s="2"></span>
+            </div>
+
+            <div class="L w scallop" style="left:330px;top:40px;font-size:13px;padding:10px 16px;transform:rotate(3deg)">내일 일은 내일의 나에게…</div>
+
+            <div class="L k player sel" style="left:60px;top:150px;width:250px;transform:rotate(-2deg)">
+              <span class="rot"></span>
+              <div style="display:flex;justify-content:space-between;font-size:11px"><span>♪ 밤산책 — hwy</span><span>⏮ ⏯ ⏭</span></div>
+              <div class="bar"><i></i></div>
+              <div style="display:flex;justify-content:space-between;font-size:9px;opacity:.8"><span>1:24</span><span>3:51</span></div>
+            </div>
+
+            <div class="L p" style="left:345px;top:150px;padding:8px 10px;gap:8px;transform:rotate(2deg);align-items:flex-end">
+              <span class="px" data-px="bear" data-s="3"></span>
+              <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start">
+                <span class="bubble">자도 자도</span>
+                <span class="bubble me" style="align-self:flex-end">계속 자고 싶어요…</span>
+              </div>
+            </div>
+
+            <div class="L g vert" style="left:40px;top:270px;padding:12px 8px;font-size:14px;transform:rotate(3deg);flex-direction:row;border:1.5px solid var(--ink);outline:1.5px solid var(--ink);outline-offset:-5px">
+              <span class="px" data-px="clover" data-s="2" style="writing-mode:horizontal-tb"></span>행운가득<span class="px" data-px="clover" data-s="2" style="writing-mode:horizontal-tb"></span>
+            </div>
+
+            <div class="L" style="left:120px;top:300px;padding:0;box-shadow:none;transform:rotate(-5deg)">
+              <span class="tag">NAME : 콩이<br>ID&nbsp;&nbsp; : 0412-HWY<br>♡ IF FOUND, PAT ME</span>
+            </div>
+
+            <div class="L w" style="left:330px;top:285px;padding:6px 8px;transform:rotate(-1deg)">
+              <div class="wongo"><span>오</span><span>늘</span><span>의</span><span></span><span>일</span><span>기</span><span>.</span></div>
+            </div>
+
+            <div class="L gingham" style="left:300px;top:370px;padding:6px;transform:rotate(4deg)">
+              <span class="w" style="padding:3px 14px;font-style:italic;border:1.5px solid var(--ink);font-size:13px">✿ Beautiful ✿</span>
+            </div>
+
+            <div class="L b stripe" style="left:60px;top:470px;font-size:13px;transform:rotate(2deg)">
+              <span class="px" data-px="star" data-s="2"></span>참 잘했어요<span class="px" data-px="star" data-s="2"></span>
+            </div>
+
+            <div class="L w" style="left:280px;top:480px;font-size:12px;transform:rotate(-3deg);border:3px double var(--ink)">
+              <span class="px" data-px="heart" data-s="2" data-c="#C35470"></span>사랑스러워<span class="px" data-px="heart" data-s="2" data-c="#C35470"></span>
+            </div>
+
+            <div class="L k diag" style="left:470px;top:540px;font-size:11px;transform:rotate(8deg);background-color:#1F1D20">
+              <span class="px" data-px="note" data-s="2" data-c="#fff"></span>PLAY ME
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- ============ RIGHT: COLLECT ============ -->
+    <aside class="side r">
+      <div class="sec">
+        <div class="h">Drawer <i>서랍 · 8</i></div>
+        <div class="body">
+          <div class="row"><button class="btn">전체선택</button><button class="btn">선택해제</button><span style="font-size:10px;color:var(--ink-2)">3 선택</span></div>
+          <div class="drawer" id="drawer"></div>
+          <div style="font-size:9.5px;color:var(--ink-2);margin-top:6px;line-height:1.4">클릭 = 다시 편집 · 드래그 = 순서 · ⧉ 복제 · ✕ 삭제</div>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="h">Board <i>판</i></div>
+        <div class="body">
+          <div class="row"><span class="lbl">크기</span><span class="pill">1080 × 1080 ▾</span></div>
+          <div class="bgs">
+            <div class="on" style="background:#252327;background-image:linear-gradient(rgba(255,255,255,.3) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.3) 1px,transparent 1px);background-size:8px 8px" title="커팅매트"></div>
+            <div style="background:#fff" title="단색"></div>
+            <div style="background:#fff;background-image:linear-gradient(#cfd8e8 1px,transparent 1px),linear-gradient(90deg,#cfd8e8 1px,transparent 1px);background-size:6px 6px" title="모눈"></div>
+            <div class="trans" title="투명"></div>
+            <div style="display:grid;place-items:center;border-style:dashed;font-size:12px">⤒</div>
+          </div>
+          <div style="font-size:9.5px;color:var(--ink-2);margin-top:5px">커팅매트 · 단색 · 모눈 · 투명 · 업로드</div>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="h">Palette <i>컬러 프리셋 · 최대 6</i></div>
+        <div class="body">
+          <div class="row"><span class="pal" id="palB"></span></div>
+          <div class="row"><span class="pill">커스텀 ▾</span><button class="btn">+ 프리셋 등록</button></div>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="h">Printer status</div>
+        <div class="status">
+          <span class="px" data-px="face" data-s="4"></span>
+          <span>I am only printing<br>your little labels.</span>
+        </div>
+      </div>
+
+      <div class="printbox">
+        <div class="opts">
+          <label><input type="radio" name="o" checked> 판 이미지 1장 (PNG)</label>
+          <label><input type="radio" name="o"> 선택 라벨 ZIP</label>
+          <label><input type="radio" name="o"> 선택 라벨 개별 PNG</label>
+          <div class="row" style="margin:6px 0 10px"><span class="lbl">해상도</span><span class="chip on">180dpi</span><span class="chip">300</span><span class="chip">360</span><label style="margin:0 0 0 4px;font-size:10px"><input type="checkbox"> 투명</label></div>
+        </div>
+        <button class="print">PRINT!</button>
+        <div style="font-size:9px;color:var(--ink-2);text-align:center;margin-top:8px;letter-spacing:.06em">서랍·판·프리셋은 이 브라우저에 자동 저장돼요</div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<div class="nav"><span class="on">EDITOR</span><span>BOARD</span><span>PRESETS</span><span>FONTS</span></div>
+<div class="sub"><span>ABOUT</span><span>LICENSE</span><span>GITHUB</span><span>HOW TO</span></div>
+
+<script>
+const ICONS={
+ heart:[".XX.XX.","XXXXXXX","XXXXXXX",".XXXXX.","..XXX..","...X..."],
+ clover:[".XX.XX.","XXXXXXX",".XXXXX.","XXXXXXX",".XX.XX.","...X...","..X...."],
+ star:["...X...","...X...","XXXXXXX",".XXXXX.","..XXX..",".XX.XX.","X.....X"],
+ bone:["XX.....XX",".XXXXXXX.","XX.....XX"],
+ bear:[".XXX...XXX.","X...XXX...X","X.........X","X..X...X..X","X....X....X","X...X.X...X",".X.......X.","..XXXXXXX.."],
+ note:["..XXXXX","..X...X","..X...X","XXX.XXX","XXX.XXX"],
+ spark:["..X..","..X..","XX.XX","..X..","..X.."],
+ face:["..XXXXX..",".X.....X.","X..X.X..X","X.......X","X.X...X.X","X..XXX..X",".X.....X.","..XXXXX.."],
+ cherry:["....XX","...X..","..X..X",".X...X","XX..XX","XX..XX"],
+ cloud:["..XXX...",".X...XX.","X......X","X......X",".XXXXXX."],
+ bunny:[".X...X.",".X...X.",".X...X.","X.....X","X.X.X.X","X..X..X",".XXXXX."],
+ flower:[".X.X.",
+ "XXXXX",".X.X.","..X..",".XX.."]
+};
+function px(name,s=2,c='currentColor'){
+  const g=ICONS[name];if(!g)return'';const h=g.length,w=g[0].length;let r='';
+  g.forEach((row,y)=>[...row].forEach((ch,x)=>{if(ch==='X')r+=`<rect x="${x}" y="${y}" width="1" height="1"/>`}));
+  return `<svg width="${w*s}" height="${h*s}" viewBox="0 0 ${w} ${h}" fill="${c}" shape-rendering="crispEdges">${r}</svg>`;
+}
+document.querySelectorAll('[data-px]').forEach(el=>el.innerHTML=px(el.dataset.px,+el.dataset.s||2,el.dataset.c));
+// library
+const lib=document.getElementById('lib');
+['bear','bunny','heart','clover','star','bone','note','spark','cherry','cloud','flower','face'].forEach((n,i)=>{
+  const d=document.createElement('div');if(i===0||i===5)d.className='on';d.innerHTML=px(n,2,'#fff');lib.appendChild(d)});
+// palettes
+const P=['#F6EBA6','#F5CFDD','#CFE6B8','#D5E6F3','#FFFEFB','#1F1D20'];
+document.getElementById('palA').innerHTML=P.map((c,i)=>`<div style="background:${c};${i===0?'outline:2px solid #2F2C30;outline-offset:1px':''}"></div>`).join('');
+document.getElementById('palB').innerHTML=P.map(c=>`<div style="background:${c}"></div>`).join('');
+// drawer
+const D=[['y','오늘도 수고했어','18mm',1],['w','내일 일은 내일의 나에게…','12mm',1],['k','♪ 밤산책 — hwy','24mm',1],['p','자도 자도 계속 자고 싶어요','24mm',0],['g','행운가득','12mm',0],['w','NAME : 콩이','18mm',0],['w','오늘의 일기.','12mm',0],['gingham','Beautiful','18mm',0]];
+document.getElementById('drawer').innerHTML=D.map(([c,t,m,on])=>`<div class="dr"><input type="checkbox" ${on?'checked':''}><span class="th ${c}">${t}</span><em>${m}</em><span style="font-size:10px">⧉ ✕</span></div>`).join('');
+</script>
+</body>
+</html>
