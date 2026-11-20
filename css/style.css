@@ -2,9 +2,10 @@
   --pink:#DDB9C8; --pink-2:#CFA5B8; --pink-3:#F1E2E8;
   --white:#FFFDFD; --paper:#F6F0F2;
   --ink:#2F2C30; --ink-2:#6B6469; --line:#2F2C30;
-  --ui:'Courier Prime','Galmuri11',monospace;
+  /* UI: 윈도우 굴림체(시스템 폰트) → 없으면 굴림 비트맵 기반 림굴(OFL) */
+  --ui:'GulimChe','굴림체','Limgul12','Galmuri11',monospace;
   --px:'Galmuri11','DotGothic16',monospace;
-  --title:'DotGothic16','Galmuri11',monospace;
+  --title:'GulimChe','굴림체','Limgul20','Galmuri11',monospace;
 }
 *{box-sizing:border-box}
 html,body{margin:0}
@@ -29,9 +30,34 @@ button,input,select,textarea{font-family:inherit;color:inherit}
 .grid{display:grid;grid-template-columns:310px minmax(0,1fr) 280px;height:calc(100vh - 150px);min-height:640px}
 .side{border-right:1.5px solid var(--line);overflow:auto;min-height:0}
 .side.r{border-right:0;border-left:1.5px solid var(--line)}
-.side.l{display:flex;flex-direction:column;overflow:hidden}
+.side.l,.side.r{display:flex;flex-direction:column;overflow:hidden}
 .side.l > .fixed{flex:none;border-bottom:1.5px solid var(--line);box-shadow:0 3px 0 rgba(47,44,48,.12);position:relative;z-index:2}
-.side.l > .scroll{flex:1;overflow:auto;min-height:0}
+.side > .scroll{flex:1;overflow:auto;min-height:0}
+.side.r > .printbox{flex:none;border-top:1.5px solid var(--line);box-shadow:0 -3px 0 rgba(47,44,48,.12);background:var(--white);position:relative;z-index:2}
+
+/* square pink scrollbars */
+::-webkit-scrollbar{width:11px;height:11px}
+::-webkit-scrollbar-track{background:var(--paper);border-left:1px solid var(--line)}
+::-webkit-scrollbar-thumb{background:var(--pink);border:1.5px solid var(--line);border-radius:0}
+::-webkit-scrollbar-thumb:hover{background:var(--pink-2)}
+::-webkit-scrollbar-corner{background:var(--paper)}
+::-webkit-scrollbar-button{display:none;width:0;height:0}
+@-moz-document url-prefix(){*{scrollbar-color:var(--pink) var(--paper)}}
+
+/* emoji flyout */
+.flybtn{width:100%;display:flex;justify-content:space-between;align-items:center;border:0;background:var(--white);padding:7px 8px;font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;cursor:pointer}
+.flybtn i{font-style:normal;color:var(--ink-2);text-transform:none;letter-spacing:.05em;margin-left:6px}
+.flybtn:hover,.flybtn.on{background:var(--pink-3)}
+.fly{position:fixed;z-index:40;width:270px;background:var(--white);border:1.5px solid var(--line);box-shadow:4px 4px 0 rgba(47,44,48,.25)}
+.fly .h .x{border:0;background:none;cursor:pointer;font-size:11px;padding:0 0 0 6px}
+
+/* color targets */
+.tgts{gap:4px;flex-wrap:nowrap}
+.tgt{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;border:1.5px solid var(--line);background:var(--white);padding:4px;font-size:11px;cursor:pointer}
+.tgt.on{background:var(--ink);color:var(--white)}
+.mini{width:14px;height:14px;border:1.5px solid var(--line);display:inline-block}
+.tgt.on .mini{border-color:var(--white)}
+.sw.edit{outline:1px dashed var(--ink);outline-offset:1px}
 
 .sec{border-bottom:1.5px solid var(--line)}
 .sec:last-child{border-bottom:0}
@@ -49,6 +75,19 @@ button,input,select,textarea{font-family:inherit;color:inherit}
 .btn.on{background:var(--ink);color:var(--white)}
 .btn.sq{width:26px;height:24px;padding:0;display:inline-grid;place-items:center}
 .btn:disabled{opacity:.4;cursor:not-allowed}
+/* 드롭다운: 선택/hover 색을 딥그레이로 */
+select option:checked{background:var(--ink) linear-gradient(var(--ink),var(--ink));color:var(--white)}
+@supports (appearance: base-select){
+  select.pill,select.pill::picker(select){appearance:base-select}
+  select.pill{display:inline-flex;align-items:center;gap:6px;cursor:pointer}
+  select.pill::picker-icon{content:'▾';font-size:10px}
+  select.pill::picker(select){border:1.5px solid var(--line);background:var(--white);box-shadow:3px 3px 0 rgba(47,44,48,.25);padding:2px 0;margin-top:2px}
+  select.pill option{font-family:var(--ui);font-size:11px;padding:3px 10px;background:var(--white);color:var(--ink)}
+  select.pill option::checkmark{display:none}
+  select.pill option:hover,select.pill option:focus-visible{background:var(--pink-3);color:var(--ink);outline:none}
+  select.pill option:checked{background:var(--ink);color:var(--white)}
+  select.pill optgroup{font-family:var(--ui);font-size:10px;color:var(--ink-2);padding:3px 6px 1px;font-weight:400}
+}
 select.pill,.pill{border:1.5px solid var(--line);border-radius:999px;background:#E9E5E7;padding:3px 10px;font-size:11px;max-width:100%}
 .chip{border:1px solid var(--line);padding:2px 6px;font-size:11px;background:var(--white);cursor:pointer}
 .chip.on{background:var(--pink)}
@@ -76,7 +115,8 @@ input[type=range]{flex:1;min-width:60px;accent-color:var(--ink);height:14px}
 .dpad button{border:1.5px solid var(--line);display:grid;place-items:center;font-size:10px;background:var(--white);cursor:pointer;padding:0}
 .dpad button.has{background:var(--pink)}
 .dpad button.cur{outline:2px solid var(--ink);outline-offset:1px}
-.dpad .c{border:1.5px dashed var(--line);display:grid;place-items:center;font-size:8px}
+.dpad .c{border-style:dashed;font-size:8px}
+.dpad .c:disabled{opacity:.35;cursor:not-allowed}
 .kao{display:flex;flex-wrap:wrap;gap:4px}
 .kao button{border:1px solid var(--line);padding:2px 5px;font-family:var(--px);font-size:11px;background:var(--white);cursor:pointer}
 .kao button:hover{background:var(--pink-3)}
@@ -125,6 +165,10 @@ input[type=range]{flex:1;min-width:60px;accent-color:var(--ink);height:14px}
 .sw{width:28px;height:28px;border:1.5px solid var(--line);position:relative;cursor:pointer;padding:0}
 .sw.on{outline:2px solid var(--ink);outline-offset:1px}
 .sw input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.side.r > .scroll{display:flex;flex-direction:column}
+.side.r > .scroll > .sec{flex:none}
+.side.r > .scroll > .sec.grow{flex:1 0 auto;display:flex;flex-direction:column;border-bottom:0}
+.sec.grow .status{flex:1;justify-content:center}
 .status{display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 10px;text-align:center;font-family:var(--px);font-size:11px}
 .printbox{padding:10px}
 .opts label{display:flex;align-items:center;gap:6px;margin-bottom:4px;font-size:11px;cursor:pointer}
@@ -147,8 +191,9 @@ input[type=range]{flex:1;min-width:60px;accent-color:var(--ink);height:14px}
   .grid{grid-template-columns:1fr;height:auto}
   .side{border:0;border-bottom:1.5px solid var(--line)}
   .side.r{border-left:0}
-  .side.l{max-height:none;overflow:visible}
-  .side.l > .scroll{overflow:visible}
+  .side.l,.side.r{max-height:none;overflow:visible}
+  .side > .scroll{overflow:visible}
+  .side.r > .printbox{position:sticky;bottom:0}
   .side.l > .fixed{position:sticky;top:0;background:var(--white)}
   .center{min-height:420px}
 }

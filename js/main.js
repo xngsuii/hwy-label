@@ -188,7 +188,6 @@ function TextSec({ s, taRef }) {
       </div>
       <div class="row"><input class="txt" placeholder="웹폰트 CSS 또는 woff URL" value=${url} onInput=${e => setUrl(e.target.value)} /></div>
       <div class="row"><input class="txt" placeholder="font-family 이름" value=${fam} onInput=${e => setFam(e.target.value)} /><button class="btn" onClick=${addUrl}>임베드</button></div>
-      <div class="muted">추가한 폰트는 이 브라우저에만 저장돼요. 재배포가 안 되는 폰트(PF스타더스트, HY헤드라인 등)는 여기로 넣어 쓰세요.</div>
     <//>`;
 }
 
@@ -295,35 +294,46 @@ function PatternSec({ s }) {
 
 function DecoSec({ s }) {
   const L = s.label;
-  const slot = s.ui.decoSlot;
-  const names = { top: '위', bottom: '아래', left: '왼쪽', right: '오른쪽' };
+  const hero = L.hero || { icon: null, textPos: 'bottom', size: 0.62 };
+  const vert = L.orientation === 'v';
+  const slot = vert && s.ui.decoSlot === 'hero' ? 'left' : s.ui.decoSlot;
+  const names = { top: '위', bottom: '아래', left: '왼쪽', right: '오른쪽', hero: '메인 그림' };
   const D = (k, ch) => html`<button class=${(L.deco[k] ? 'has' : '') + (slot === k ? ' cur' : '')} onClick=${() => setUi({ decoSlot: k })} title=${names[k]}>${ch}</button>`;
-  const pick = n => setLabel(l => ({ deco: { ...l.deco, [slot]: l.deco[slot] === n ? null : n } }));
+  const cur = slot === 'hero' ? hero.icon : L.deco[slot];
+  const pick = n => setLabel(l => slot === 'hero'
+    ? { hero: { ...hero, icon: hero.icon === n ? null : n } }
+    : { deco: { ...l.deco, [slot]: l.deco[slot] === n ? null : n } });
+  const setHero = p => setLabel({ hero: { ...hero, ...p } });
   const list = ICON_GROUPS[s.ui.iconGroup] || ICON_GROUPS['동물'];
-  const desc = Object.entries(L.deco).filter(([, v]) => v).map(([k, v]) => `${names[k]} ${v}`).join(' · ') || '없음';
-  const vertNote = L.orientation === 'v' ? '세로형: 위/아래 = 글줄 양 끝, 좌/우 = 반복 장식' : '가로형: 좌/우 = 양 끝, 위/아래 = 반복 장식';
+  const sideName = vert ? '좌/우' : '위/아래';
   return html`
-    <${Sec} title="Deco" sub="장식 · 상하좌우">
+    <${Sec} title="Deco" sub="장식 · 메인 그림">
       <div class="row" style="align-items:flex-start;gap:12px">
         <div class="dpad">
           <span></span>${D('top', '↑')}<span></span>
-          ${D('left', '←')}<span class="c">TEXT</span>${D('right', '→')}
+          ${D('left', '←')}
+          <button class=${'c' + (hero.icon && !vert ? ' has' : '') + (slot === 'hero' ? ' cur' : '')} disabled=${vert} title="메인 그림" onClick=${() => setUi({ decoSlot: 'hero' })}>MAIN</button>
+          ${D('right', '→')}
           <span></span>${D('bottom', '↓')}<span></span>
         </div>
-        <div style="flex:1;font-size:10px;line-height:1.5">
-          <b>${names[slot]}</b> 슬롯 선택됨 → 아이콘 클릭 (다시 누르면 빼기)<br/>
-          <span class="muted">${desc}</span><br/>
-          <span class="muted">${vertNote}</span>
-          <div style="margin-top:4px"><button class="btn" onClick=${() => setLabel({ deco: { top: null, bottom: null, left: null, right: null } })}>모두 빼기</button></div>
+        <div style="flex:1;font-size:10px;line-height:1.6">
+          <b>${names[slot]}</b> → 아이콘 클릭<br/>
+          <label class="check"><input type="checkbox" checked=${!!L.decoRepeat} onChange=${e => setLabel({ decoRepeat: e.target.checked })} /> ${sideName} 반복</label>
+          <div style="margin-top:4px"><button class="btn" onClick=${() => setLabel({ deco: { top: null, bottom: null, left: null, right: null }, hero: { ...hero, icon: null } })}>모두 빼기</button></div>
         </div>
       </div>
+      ${slot === 'hero' ? html`
+        <div class="row"><span class="lbl">글자</span>
+          <${Toggle} value=${hero.textPos} onChange=${v => setHero({ textPos: v })} options=${[['bottom', '그림 아래'], ['top', '그림 위']]} />
+        </div>
+        <${Range} label="그림 크기" min=${0.3} max=${0.85} step=${0.01} value=${hero.size} onInput=${v => setHero({ size: v })} fmt=${v => Math.round(v * 100) + '%'} />` : null}
       <div class="row">
         <select class="pill" value=${s.ui.iconGroup} onChange=${e => setUi({ iconGroup: e.target.value })}>
           ${Object.keys(ICON_GROUPS).map(g => html`<option value=${g}>${g}</option>`)}
         </select>
       </div>
       <div class="lib">
-        ${list.map(n => html`<button class=${L.deco[slot] === n ? 'on' : ''} title=${n} onClick=${() => pick(n)}><${Px} name=${n} s=${2} c="#fff" /></button>`)}
+        ${list.map(n => html`<button class=${cur === n ? 'on' : ''} title=${n} onClick=${() => pick(n)}><${Px} name=${n} s=${2} c="#fff" /></button>`)}
       </div>
       <div class="row" style="margin-top:8px">
         <button class="btn" disabled title="곧 추가돼요">📷 이미지 → 비트맵 (준비 중)</button>
@@ -349,29 +359,44 @@ function EmojiSec({ s, taRef }) {
     if (e.shiftKey) store.set(st => ({ ...st, kaomojiFav: st.kaomojiFav.filter((_, j) => j !== i) }));
     else insert(t);
   };
+  const open = !!s.ui.emojiOpen;
+  const btnRef = useRef();
+  const [pos, setPos] = useState(null);
+  useEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const side = document.querySelector('.side.l');
+      const b = btnRef.current;
+      if (!side || !b) return;
+      const rs = side.getBoundingClientRect(), rb = b.getBoundingClientRect();
+      setPos({ left: rs.right + 6, top: Math.max(8, Math.min(rb.top, window.innerHeight - 340)) });
+    };
+    place();
+    window.addEventListener('scroll', place, true);
+    window.addEventListener('resize', place);
+    return () => { window.removeEventListener('scroll', place, true); window.removeEventListener('resize', place); };
+  }, [open]);
   return html`
-    <${Sec} title="Emoji" sub="이모지 · 이모티콘">
-      <div class="row"><span class="lbl">이모지</span>
-        <${Toggle} value=${L.emojiMono} onChange=${v => setLabel({ emojiMono: v })} options=${[[true, '흑백 변환'], [false, '컬러 유지']]} />
-      </div>
-      ${s.kaomojiFav.length ? html`<div class="sub-h">즐겨찾기 <span style="text-transform:none;letter-spacing:0">(shift+클릭 = 삭제)</span></div>
-        <div class="kao" style="margin-bottom:6px">${s.kaomojiFav.map((t, i) => html`<button onClick=${e => onFav(e, t, i)}>${t}</button>`)}</div>` : null}
-      <div class="kao">
-        ${KAOMOJI.map(t => html`<button onClick=${() => insert(t)}>${t}</button>`)}
-        <button style="border-style:dashed" onClick=${addFav}>+ 즐겨찾기</button>
-      </div>
-    <//>`;
-}
-
-function ColorSec({ s }) {
-  const L = s.label;
-  const row = (k) => html`<span class="pal">${s.palette.map(c => html`<button class=${'sw' + (L[k].toLowerCase() === c.toLowerCase() ? ' on' : '')} style=${'background:' + c} title=${c} onClick=${() => setLabel({ [k]: c })}></button>`)}</span>`;
-  return html`
-    <${Sec} title="Color" sub="판 팔레트에서" cls="last">
-      <div class="row"><span class="lbl">테이프</span>${row('tapeColor')}</div>
-      <div class="row"><span class="lbl">잉크</span>${row('inkColor')}</div>
-      <div class="muted">팔레트 색은 오른쪽 PALETTE에서 바꿔요.</div>
-    <//>`;
+    <div class="sec">
+      <button class=${'flybtn' + (open ? ' on' : '')} ref=${btnRef} onClick=${() => setUi({ emojiOpen: !open })}>
+        <span>Emoji <i>이모지 · 이모티콘</i></span><span>${open ? '◂' : '▸'}</span>
+      </button>
+    </div>
+    ${open && pos ? html`
+      <div class="fly" style=${`left:${pos.left}px;top:${pos.top}px`}>
+        <div class="h">Emoji <i>이모지 · 이모티콘 <button class="x" onClick=${() => setUi({ emojiOpen: false })}>✕</button></i></div>
+        <div class="body">
+          <div class="row"><span class="lbl">이모지</span>
+            <${Toggle} value=${L.emojiMono} onChange=${v => setLabel({ emojiMono: v })} options=${[[true, '흑백 변환'], [false, '컬러 유지']]} />
+          </div>
+          ${s.kaomojiFav.length ? html`<div class="sub-h">즐겨찾기 <span style="text-transform:none;letter-spacing:0">(shift+클릭 = 삭제)</span></div>
+            <div class="kao" style="margin-bottom:6px">${s.kaomojiFav.map((t, i) => html`<button onClick=${e => onFav(e, t, i)}>${t}</button>`)}</div>` : null}
+          <div class="kao">
+            ${KAOMOJI.map(t => html`<button onClick=${() => insert(t)}>${t}</button>`)}
+            <button style="border-style:dashed" onClick=${addFav}>+ 즐겨찾기</button>
+          </div>
+        </div>
+      </div>` : null}`;
 }
 
 function Left({ s, fv }) {
@@ -380,14 +405,13 @@ function Left({ s, fv }) {
     <aside class="side l">
       <${Preview} s=${s} fv=${fv} />
       <div class="scroll">
+        <${EmojiSec} s=${s} taRef=${taRef} />
         <${TextSec} s=${s} taRef=${taRef} />
         <${SizeSec} s=${s} />
         <${TypeSec} s=${s} />
         <${FrameSec} s=${s} />
         <${PatternSec} s=${s} />
         <${DecoSec} s=${s} />
-        <${EmojiSec} s=${s} taRef=${taRef} />
-        <${ColorSec} s=${s} />
       </div>
     </aside>`;
 }
@@ -532,7 +556,6 @@ function Drawer({ s }) {
           })}
           ${!s.drawer.length ? html`<div class="muted">아직 비어 있어요.</div>` : null}
         </div>
-        <div class="muted" style="margin-top:6px">썸네일 클릭 = 다시 편집 · ▲ 순서 · ⧉ 복제 · ✕ 삭제</div>
       </div>
     </div>`;
 }
@@ -602,12 +625,22 @@ function PaletteSec({ s }) {
     if (!confirm('이 컬러 프리셋을 지울까요?')) return;
     store.set(st => ({ ...st, palettePresets: st.palettePresets.filter(p => p.id !== st.palettePresetId), palettePresetId: 'custom' }));
   };
+  const L = s.label;
+  const target = s.ui.colorTarget || 'tapeColor';
+  const editing = !!s.ui.paletteEdit;
+  const same = (a, b) => (a || '').toLowerCase() === (b || '').toLowerCase();
+  const T = (k, t) => html`<button class=${'tgt' + (target === k ? ' on' : '')} onClick=${() => setUi({ colorTarget: k })}>
+      <span class="mini" style=${'background:' + L[k]}></span>${t}</button>`;
   return html`
     <div class="sec">
-      <div class="h">Palette <i>컬러 프리셋 · 6색</i></div>
+      <div class="h">Color <i>테이프 · 잉크 · 팔레트</i></div>
       <div class="body">
+        <div class="row tgts">${T('tapeColor', '테이프')}${T('inkColor', '잉크')}</div>
         <div class="row"><span class="pal">
-          ${s.palette.map((c, i) => html`<label class="sw" style=${'background:' + c} title=${c + ' (클릭해서 변경)'}><input type="color" value=${c} onInput=${e => setColor(i, e.target.value)} /></label>`)}
+          ${s.palette.map((c, i) => editing
+            ? html`<label class="sw edit" style=${'background:' + c} title=${c + ' 바꾸기'}><input type="color" value=${c} onInput=${e => setColor(i, e.target.value)} /></label>`
+            : html`<button class=${'sw' + (same(L[target], c) ? ' on' : '')} style=${'background:' + c} title=${c} onClick=${() => setLabel({ [target]: c })}></button>`)}
+          <button class=${'btn sq' + (editing ? ' on' : '')} title="팔레트 색 편집" onClick=${() => setUi({ paletteEdit: !editing })}>✎</button>
         </span></div>
         <div class="row">
           <select class="pill" value=${s.palettePresetId} onChange=${e => choose(e.target.value)}>
@@ -625,7 +658,7 @@ const MOODS = ['I am only printing\nyour little labels.', 'ink is warm.\ntape is
 function Status({ s }) {
   const msg = MOODS[s.drawer.length % MOODS.length];
   return html`
-    <div class="sec">
+    <div class="sec grow">
       <div class="h">Printer status</div>
       <div class="status"><${Px} name="face" s=${4} c="#2F2C30" /><span style="white-space:pre-line">${msg}</span></div>
     </div>`;
@@ -677,17 +710,18 @@ function PrintBox({ s }) {
         : html`<div class="row" style="margin:6px 0 4px"><label class="check" style="margin:0"><input type="checkbox" checked=${ui.transparent} onChange=${e => setUi({ transparent: e.target.checked })} /> 배경 없이 (투명)</label></div>`}
       </div>
       <button class="print" disabled=${busy} onClick=${go} style="margin-top:6px">${busy ? 'PRINTING…' : 'PRINT!'}</button>
-      <div class="muted" style="text-align:center;margin-top:8px">서랍·판·프리셋은 이 브라우저에 자동 저장돼요</div>
     </div>`;
 }
 
 function Right({ s }) {
   return html`
     <aside class="side r">
-      <${Drawer} s=${s} />
-      <${BoardSec} s=${s} />
-      <${PaletteSec} s=${s} />
-      <${Status} s=${s} />
+      <div class="scroll">
+        <${Drawer} s=${s} />
+        <${PaletteSec} s=${s} />
+        <${BoardSec} s=${s} />
+        <${Status} s=${s} />
+      </div>
       <${PrintBox} s=${s} />
     </aside>`;
 }

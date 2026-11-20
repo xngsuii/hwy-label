@@ -63,6 +63,8 @@ export function defaultLabel() {
     frame: 'none',         // none | solid | dotted | double
     pattern: 'none',       // none | check | stripe | dot | diag
     deco: { left: 'bear', right: 'bone', top: null, bottom: null },
+    decoRepeat: false,     // 가장자리 장식 반복
+    hero: { icon: null, textPos: 'bottom', size: 0.62 }, // 메인 그림
     tapeColor: '#F6EBA6',
     inkColor: '#2F2C30',
     emojiMono: true,
@@ -83,7 +85,7 @@ export function defaultState() {
     typePresets: [],          // {id,name,fontId,sizeMode,sizePt,tracking,leading,widthScale}
     kaomojiFav: [],
     customFonts: [],          // 메타데이터만 (blob은 idb 'fonts')
-    ui: { decoSlot: 'left', iconGroup: '동물', printMode: 'board', dpi: 300, transparent: false, zoom: 0 },
+    ui: { decoSlot: 'left', iconGroup: '동물', printMode: 'board', dpi: 300, transparent: false, zoom: 0, emojiOpen: false, colorTarget: 'tapeColor', paletteEdit: false },
   };
 }
 
@@ -110,7 +112,7 @@ export const store = {
       const d = defaultState();
       state = {
         ...d, ...saved,
-        label: { ...d.label, ...saved.label, deco: { ...d.label.deco, ...(saved.label?.deco || {}) } },
+        label: { ...d.label, ...saved.label, deco: { ...d.label.deco, ...(saved.label?.deco || {}) }, hero: { ...d.label.hero, ...(saved.label?.hero || {}) } },
         board: { ...d.board, ...saved.board },
         ui: { ...d.ui, ...saved.ui },
       };

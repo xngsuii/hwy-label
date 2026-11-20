@@ -2,7 +2,7 @@
 import { drawIcon, iconSize } from './pixel.js';
 
 const PT_MM = 0.3528;
-const FRAME_LW = 0.35;     // mm
+const FRAME_LW = 0.17;     // mm (300dpi ≈ 2px, 180dpi ≈ 1px)
 const FRAME_INSET = 0.7;   // mm
 
 const seg = typeof Intl !== 'undefined' && Intl.Segmenter ? new Intl.Segmenter('ko', { granularity: 'grapheme' }) : null;
@@ -33,7 +33,7 @@ function fontStr(L, family, px) {
 
 function frameSpace(frame) {
   if (frame === 'none') return 0;
-  return FRAME_INSET + (frame === 'double' ? FRAME_LW * 3 : FRAME_LW) + 0.3;
+  return FRAME_INSET + (frame === 'double' ? FRAME_LW * 3.5 : FRAME_LW) + 0.3;
 }
 
 // ---------- 레이아웃 ----------
@@ -66,22 +66,36 @@ export function layoutLabel(L, family) {
   const crossDecoSpace = crossDecoCount * (cdSize + cdGap);
   let innerC = Math.max(0.5, baseC - crossDecoSpace);
 
+  // 메인 그림 (큰 그림 + 작은 텍스트 위/아래). 세로형은 미지원
+  const hero = !vert && L.hero && L.hero.icon && iconSize(L.hero.icon).w ? L.hero : null;
+  const hasText = (L.text || '').trim().length > 0;
+  let heroH = 0, heroGap = 0, heroW = 0;
+  const heroRatio = hero ? iconSize(hero.icon).w / iconSize(hero.icon).h : 1;
+  if (hero) {
+    heroH = hasText ? innerC * (hero.size || 0.62) : innerC;
+    heroGap = hasText ? innerC * 0.06 : 0;
+    heroW = heroH * heroRatio;
+  }
+  let textC = Math.max(0.3, innerC - heroH - heroGap);
+
   const blockFactor = 1 + (n - 1) * lead;
   let fs;
   if (L.sizeMode === 'manual') {
     fs = L.sizePt * PT_MM;
-    if (L.wrapMode === 'shrink' && fs * blockFactor > innerC) fs = innerC / blockFactor;
+    if (L.wrapMode === 'shrink' && fs * blockFactor > textC) fs = textC / blockFactor;
   } else {
-    fs = L.wrapMode === 'grow' ? innerC * 0.8 : (innerC / blockFactor) * 0.8;
+    fs = L.wrapMode === 'grow' ? textC * 0.64 : (textC / blockFactor) * 0.64;
   }
   // 높이 늘림 모드: 필요한 만큼 테이프 폭 증가
   if (L.wrapMode === 'grow' && L.orientation !== 'square' && L.orientation !== 'free') {
     const need = fs * blockFactor;
-    if (need > innerC) {
-      crossSize += need - innerC;
-      innerC = need;
+    if (need > textC) {
+      crossSize += need - textC;
+      innerC += need - textC;
+      textC = need;
     }
   }
+  if (!hasText && hero) fs = 0.01;
 
   const flowLen = (line, f) => {
     if (!line.length) return 0;
@@ -92,28 +106,34 @@ export function layoutLabel(L, family) {
   };
 
   // 흐름 방향 장식 (가로형 좌우 / 세로형 위아래): 단일 아이콘
-  const flowDeco = flowDecoKeys.map(k => {
+  let flowDeco = flowDecoKeys.map(k => {
     const name = deco[k];
     if (!name) return null;
     const { w, h } = iconSize(name);
     if (!w) return null;
     // 아이콘을 (교차 길이 × 교차 길이) 상자 안에 비율 유지로 맞춤
-    const box = Math.min(innerC, baseC) * 0.72;
+    const box = (hero ? Math.min(heroH, innerC) : Math.min(innerC, baseC)) * 0.72;
     const cell = box / Math.max(w, h);
     const iw = w * cell, ih = h * cell;
     return { name, w: iw, h: ih, len: vert ? ih : iw };
   });
-  const gap = innerC * 0.22;
+  const gap = (hero ? Math.min(heroH, innerC) : innerC) * 0.22;
 
   const compute = f => {
-    const lens = lines.map(l => flowLen(l, f));
+    const lens = lines.map(l => hasText || !hero ? flowLen(l, f) : 0);
     const textFlow = Math.max(0.1, ...lens);
     const decoLen = flowDeco.reduce((s, d) => s + (d ? d.len + gap : 0), 0);
-    return { lens, textFlow, need: 2 * (fs0 + padF) + decoLen + textFlow, decoLen };
+    return { lens, textFlow, need: 2 * (fs0 + padF) + decoLen + Math.max(textFlow, heroW), decoLen };
   };
   let c = compute(fs);
+  // 메인 그림 모드에서 양옆 장식이 들어갈 자리가 없으면 생략
+  if (hero && fixedFlow && flowSize - 2 * (fs0 + padF) - c.decoLen < heroW * 0.8) {
+    flowDeco = [null, null];
+    c = compute(fs);
+  }
   if (fixedFlow) {
     const avail = flowSize - 2 * (fs0 + padF) - c.decoLen;
+    if (heroW > avail && avail > 0) { heroH *= avail / heroW; heroW = avail; }
     if (c.textFlow > avail && avail > 0) {
       fs *= avail / c.textFlow;
       c = compute(fs);
@@ -125,7 +145,7 @@ export function layoutLabel(L, family) {
   const wMm = vert ? crossSize : flowSize;
   const hMm = vert ? flowSize : crossSize;
   return { vert, lines, n, lead, tr, ws, fs, crossSize, flowSize, wMm, hMm, fs0, padF, padC, innerC, baseC,
-    cdSize, cdGap, crossDecoKeys, flowDeco, gap, ...c, family };
+    cdSize, cdGap, crossDecoKeys, flowDeco, gap, hero, heroH, heroW, heroGap, hasText, ...c, family };
 }
 
 // ---------- 그리기 ----------
@@ -162,7 +182,7 @@ export function renderLabel(L, family, pxPerMm = 10) {
     const along = Y.vert ? size * h / w : size * w / h; // 흐름 방향 길이
     const spacing = along * 0.7;
     const span = flowB - flowA;
-    const count = Math.max(1, Math.floor((span + spacing) / (along + spacing)));
+    const count = L.decoRepeat ? Math.max(1, Math.floor((span + spacing) / (along + spacing))) : 1;
     const total = count * along + (count - 1) * spacing;
     let f = flowA + (span - total) / 2;
     const c0 = idx === 0 ? cStart : cEnd - size;
@@ -191,12 +211,25 @@ export function renderLabel(L, family, pxPerMm = 10) {
   if (dEnd) { drawFlowDeco(dEnd, fB - dEnd.len); fB -= dEnd.len + Y.gap; }
   const areaLen = fB - fA;
 
+  // 메인 그림
+  let tStart = cStart, tLen = innerC;
+  if (Y.hero) {
+    const { w, h } = iconSize(Y.hero.icon);
+    const cellPx = snap(Y.heroH * P / h);
+    const realW = w * cellPx / P, realH = h * cellPx / P;
+    const top = Y.hero.textPos === 'top' && Y.hasText ? cEnd - Y.heroH : cStart;
+    drawIcon(ctx, Y.hero.icon, (fA + (areaLen - realW) / 2) * P, (top + (Y.heroH - realH) / 2) * P, cellPx, ink);
+    if (Y.hero.textPos === 'top') { tStart = cStart; tLen = top - Y.heroGap - cStart; }
+    else { tStart = top + Y.heroH + Y.heroGap; tLen = cEnd - tStart; }
+  }
+  if (Y.hero && !Y.hasText) return { canvas: cv, wMm: Y.wMm, hMm: Y.hMm, layout: Y };
+
   const fsPx = Y.fs * P;
   ctx.font = fontStr(L, family, fsPx);
   ctx.textBaseline = 'middle';
   ctx.fillStyle = ink;
   const blockC = Y.fs * (1 + (Y.n - 1) * Y.lead);
-  const c0 = cStart + (innerC - blockC) / 2;
+  const c0 = tStart + (tLen - blockC) / 2;
   const f100 = fontStr(L, family, 100);
   const deco = Math.max(1, Y.fs * 0.07 * P);
 
@@ -266,7 +299,7 @@ function drawFrame(ctx, type, W, H, P, ink) {
   ctx.lineWidth = lw;
   const rect = d => ctx.strokeRect(Math.round(ins + d) + lw / 2, Math.round(ins + d) + lw / 2, Math.round(W - 2 * (ins + d)) - lw, Math.round(H - 2 * (ins + d)) - lw);
   if (type === 'dotted') { ctx.setLineDash([lw, lw * 1.4]); rect(0); ctx.setLineDash([]); }
-  else if (type === 'double') { rect(0); rect(lw * 2); }
+  else if (type === 'double') { rect(0); rect(lw * 2.5); }
   else rect(0);
 }
 
