@@ -7,7 +7,14 @@ export const BOARD_SIZES = {
   '1080x1350': [1080, 1350, '1080 × 1350 (4:5)'],
   '1080x1920': [1080, 1920, '1080 × 1920 (스토리)'],
   '2480x3508': [2480, 3508, 'A4 · 300dpi'],
+  'A5': [1748, 2480, 'A5 · 300dpi'],
+  'B5': [2150, 3035, 'B5 · 300dpi'],
 };
+export function boardDims(size, landscape) {
+  const [w, h] = BOARD_SIZES[size] || BOARD_SIZES['1080x1080'];
+  return landscape ? { w: Math.max(w, h), h: Math.min(w, h) } : { w: Math.min(w, h), h: Math.max(w, h) };
+}
+const itemScale = (board, id) => (board.items.find(i => i.id === id)?.s) || 1;
 
 export const BOARD_PPM = 300 / 25.4; // 판 위 라벨은 300dpi 기준 크기
 
@@ -25,7 +32,7 @@ export function autoLayout(labels, customFonts, board) {
   const rows = [];
   let row = { items: [], w: 0, h: 0 };
   for (const L of labels) {
-    const s = labelPx(L, customFonts, scale);
+    const s = labelPx(L, customFonts, scale * itemScale(board, L.id));
     if (row.items.length && row.w + gap + s.w > W - 2 * margin) { rows.push(row); row = { items: [], w: 0, h: 0 }; }
     row.items.push({ L, s });
     row.w += (row.items.length > 1 ? gap : 0) + s.w;
@@ -38,7 +45,7 @@ export function autoLayout(labels, customFonts, board) {
   for (const r of rows) {
     let x = (W - r.w) / 2;
     for (const { L, s } of r.items) {
-      items.push({ id: L.id, x, y: y + (r.h - s.h) / 2, rot: 0 });
+      items.push({ id: L.id, x, y: y + (r.h - s.h) / 2, rot: 0, s: itemScale(board, L.id) });
       x += s.w + gap;
     }
     y += r.h + gap;
@@ -53,7 +60,8 @@ export function scatterLayout(labels, customFonts, board) {
   const placed = [];
   const items = [];
   for (const L of labels) {
-    const s = labelPx(L, customFonts, scale);
+    const sc = itemScale(board, L.id);
+    const s = labelPx(L, customFonts, scale * sc);
     let best = null;
     for (let t = 0; t < 40; t++) {
       const x = margin + Math.random() * Math.max(1, W - 2 * margin - s.w);
@@ -68,7 +76,7 @@ export function scatterLayout(labels, customFonts, board) {
       if (ov === 0) break;
     }
     placed.push({ x: best.x, y: best.y, w: s.w, h: s.h });
-    items.push({ id: L.id, x: best.x, y: best.y, rot: Math.round((Math.random() * 2 - 1) * 12) });
+    items.push({ id: L.id, x: best.x, y: best.y, rot: Math.round((Math.random() * 2 - 1) * 12), s: sc });
   }
   return items;
 }
@@ -131,7 +139,7 @@ export async function renderBoard(state, { transparent = false } = {}) {
     const L = byId[it.id];
     if (!L) continue;
     const f = fontById(L.fontId, customFonts);
-    const { canvas } = renderLabel(L, f.family, BOARD_PPM * scale);
+    const { canvas } = renderLabel(L, f.family, BOARD_PPM * scale * (it.s || 1));
     ctx.save();
     ctx.translate(it.x + canvas.width / 2, it.y + canvas.height / 2);
     ctx.rotate((it.rot || 0) * Math.PI / 180);

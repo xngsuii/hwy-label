@@ -1,9 +1,10 @@
 import { html, render, useState, useEffect, useRef, useMemo, useCallback } from 'https://cdn.jsdelivr.net/npm/htm@3.1.1/preact/standalone.module.js';
 import { store, setLabel, setUi, setBoard, defaultLabel, uid, TAPE_WIDTHS, exportBackup, importBackup } from './store.js';
 import { BUILTIN_FONTS, fontById, ensureFont, registerCustomFont, loadStoredFonts, saveStoredFonts } from './fonts.js';
-import { renderLabel, layoutLabel, clearMeasureCache, canvasToBlob } from './render.js';
-import { ICON_GROUPS, iconSvg } from './pixel.js';
-import { BOARD_SIZES, BOARD_PPM, autoLayout, scatterLayout, syncBoard, renderBoard } from './board.js';
+import { renderLabel, layoutLabel, clearMeasureCache, canvasToBlob, isSpecialFrame } from './render.js';
+import { ICON_GROUPS, iconSvg, iconSize, setCustomIcons } from './pixel.js';
+import { BOARD_SIZES, BOARD_PPM, boardDims, autoLayout, scatterLayout, syncBoard, renderBoard } from './board.js';
+import { loadImageFile, toBitmap, rowsToCanvas } from './bitmap.js';
 import { idb } from './store.js';
 
 // ---------------- hooks ----------------
@@ -30,6 +31,57 @@ function toast(msg) {
   el.style.display = 'block';
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { el.style.display = 'none'; }, 2200);
+}
+
+// ---------------- 사이트 무드 확인/입력 창 (시스템 confirm/prompt 대신) ----------------
+let dialogSetter = null;
+function openDialog(o) {
+  return new Promise(res => dialogSetter ? dialogSetter({ ...o, res }) : res(o.kind === 'prompt' ? null : false));
+}
+async function askConfirm(key, msg, { title = '확인', ok = '확인' } = {}) {
+  if (key && store.get().ui.skipConfirm?.[key]) return true;
+  return openDialog({ kind: 'confirm', key, title, msg, ok });
+}
+function askText(msg, def = '', { title = '입력', ok = '저장' } = {}) {
+  return openDialog({ kind: 'prompt', title, msg, def, ok });
+}
+function Dialog() {
+  const [d, setD] = useState(null);
+  const [val, setVal] = useState('');
+  const [skip, setSkip] = useState(false);
+  const boxRef = useRef();
+  useEffect(() => {
+    dialogSetter = o => { setD(o); setVal(o.def || ''); setSkip(false); };
+    return () => { dialogSetter = null; };
+  }, []);
+  useEffect(() => {
+    if (!d) return;
+    requestAnimationFrame(() => boxRef.current?.querySelector(d.kind === 'prompt' ? 'input.txt' : '.ok')?.focus());
+  }, [d]);
+  if (!d) return null;
+  const close = result => {
+    if (d.kind === 'confirm' && result && skip && d.key) setUi({ skipConfirm: { ...(store.get().ui.skipConfirm || {}), [d.key]: true } });
+    d.res(result);
+    setD(null);
+  };
+  const ok = () => close(d.kind === 'prompt' ? (val.trim() || null) : true);
+  const cancel = () => close(d.kind === 'prompt' ? null : false);
+  return html`
+    <div class="dlg-back" onPointerDown=${e => { if (e.target === e.currentTarget) cancel(); }}>
+      <div class="dlg" ref=${boxRef} role="dialog" aria-modal="true"
+           onKeyDown=${e => { if (e.key === 'Escape') cancel(); if (e.key === 'Enter' && d.kind === 'prompt') ok(); }}>
+        <div class="h">${d.title} <i><button class="x" aria-label="닫기" onClick=${cancel}>✕</button></i></div>
+        <div class="body">
+          <div class="dlg-msg"><${Px} name="face" s=${3} c="#2F2C30" /><p>${d.msg}</p></div>
+          ${d.kind === 'prompt' ? html`<div class="row"><input class="txt" value=${val} onInput=${e => setVal(e.target.value)} /></div>` : null}
+          ${d.kind === 'confirm' && d.key ? html`<label class="check dlg-skip"><input type="checkbox" checked=${skip} onChange=${e => setSkip(e.target.checked)} /> 다음부터 묻지 않기</label>` : null}
+          <div class="dlg-btns">
+            <button class="btn" onClick=${cancel}>취소</button>
+            <button class="btn on ok" onClick=${ok}>${d.ok}</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
 }
 
 // 라벨 이미지 캐시 (썸네일 / 판)
@@ -71,7 +123,31 @@ const Range = ({ label, min, max, step = 1, value, onInput, fmt = v => v }) => h
 const Toggle = ({ options, value, onChange }) => html`
   <span class="toggle">${options.map(([v, t]) => html`<button class=${value === v ? 'on' : ''} onClick=${() => onChange(v)}>${t}</button>`)}</span>`;
 
-const Px = ({ name, s = 2, c }) => html`<span class="px" dangerouslySetInnerHTML=${{ __html: iconSvg(name, s, c) }}></span>`;
+// 버튼용 픽셀 아이콘 (7×7, 'X' = 칠함)
+const UI_ICONS = {
+  bold:      ['XXXXX..', 'XX..XX.', 'XX..XX.', 'XXXXX..', 'XX..XX.', 'XX..XX.', 'XXXXX..'],
+  italic:    ['...XXXX', '....XX.', '...XX..', '...XX..', '..XX...', '.XX....', 'XXXX...'],
+  underline: ['XX...XX', 'XX...XX', 'XX...XX', 'XX...XX', '.XXXXX.', '.......', 'XXXXXXX'],
+  strike:    ['.XXXXX.', 'XX.....', '.XXX...', 'XXXXXXX', '....XX.', 'X...XX.', '.XXXX..'],
+  outline:   ['..XXX..', '.X...X.', 'X..X..X', 'X.X.X.X', 'X.XXX.X', 'X.X.X.X', 'XXX.XXX'],
+  al_left:   ['XXXXXXX', '.......', 'XXXX...', '.......', 'XXXXXXX', '.......', 'XXXX...'],
+  al_center: ['XXXXXXX', '.......', '.XXXXX.', '.......', 'XXXXXXX', '.......', '.XXXXX.'],
+  al_right:  ['XXXXXXX', '.......', '...XXXX', '.......', 'XXXXXXX', '.......', '...XXXX'],
+  al_justify:['XXXXXXX', '.......', 'XXXXXXX', '.......', 'XXXXXXX', '.......', 'XXXXXXX'],
+};
+const UiIcon = ({ name, s = 1.43 }) => {
+  const g = UI_ICONS[name];
+  let r = '';
+  g.forEach((row, y) => [...row].forEach((ch, x) => { if (ch === 'X') r += `<rect x="${x}" y="${y}" width="1" height="1"/>`; }));
+  return html`<span class="px" aria-hidden="true" dangerouslySetInnerHTML=${{ __html: `<svg width="${7 * s}" height="${7 * s}" viewBox="0 0 7 7" fill="currentColor" shape-rendering="crispEdges">${r}</svg>` }}></span>`;
+};
+
+// fit: 아이콘의 긴 변을 이 px 이하로 맞춤 (큰 사용자 이미지용)
+const Px = ({ name, s = 2, c, fit }) => {
+  let sc = s;
+  if (fit) { const { w, h } = iconSize(name); sc = Math.min(s, fit / Math.max(1, w, h)); }
+  return html`<span class="px" dangerouslySetInnerHTML=${{ __html: iconSvg(name, sc, c) }}></span>`;
+};
 
 // ---------------- LEFT ----------------
 function Preview({ s, fv }) {
@@ -154,13 +230,13 @@ function TextSec({ s, taRef }) {
   const removeFont = async () => {
     const id = L.fontId;
     if (!custom.some(f => f.id === id)) return;
-    if (!confirm('이 폰트를 목록에서 지울까요?')) return;
+    if (!(await askConfirm('fontDelete', '이 폰트를 목록에서 지울까요?', { title: '폰트 삭제', ok: '지우기' }))) return;
     const list = ((await idb.get('fonts')) || []).filter(f => f.id !== id);
     await saveStoredFonts(list);
     store.set(st => ({ ...st, customFonts: st.customFonts.filter(f => f.id !== id), label: { ...st.label, fontId: 'galmuri11' } }));
   };
-  const B = (k, ch, style = '') => html`<button class=${'btn sq' + (L[k] ? ' on' : '')} style=${style} title=${k} onClick=${() => setLabel({ [k]: !L[k] })}>${ch}</button>`;
-  const A = (v, ch, t) => html`<button class=${'btn sq' + (L.align === v ? ' on' : '')} title=${t} onClick=${() => setLabel({ align: v })}>${ch}</button>`;
+  const B = (k, t) => html`<button class=${'btn sq' + (L[k] ? ' on' : '')} title=${t} aria-label=${t} onClick=${() => setLabel({ [k]: !L[k] })}><${UiIcon} name=${k} /></button>`;
+  const A = (v, t) => html`<button class=${'btn sq' + (L.align === v ? ' on' : '')} title=${t} aria-label=${t} onClick=${() => setLabel({ align: v })}><${UiIcon} name=${'al_' + v} /></button>`;
   return html`
     <${Sec} title="Text" sub="텍스트 · 폰트">
       <textarea class="main" ref=${taRef} value=${L.text} onInput=${e => setLabel({ text: e.target.value })} placeholder="라벨에 넣을 글자"></textarea>
@@ -177,9 +253,12 @@ function TextSec({ s, taRef }) {
         ${L.sizeMode === 'manual' ? html`<input class="num" type="number" min="3" max="200" step="0.5" value=${L.sizePt} onInput=${e => setLabel({ sizePt: +e.target.value || 14 })} /><span style="font-size:10px">pt</span>` : null}
       </div>
       <div class="row">
-        ${B('bold', html`<b>B</b>`)}${B('italic', html`<i>I</i>`)}${B('underline', html`<u>U</u>`)}${B('strike', html`<s>S</s>`)}${B('outline', 'O', '-webkit-text-stroke:1px currentColor;color:transparent;font-weight:700')}
-        <span style="width:6px"></span>
-        ${A('left', '⇤', '왼쪽')}${A('center', '≡', '가운데')}${A('right', '⇥', '오른쪽')}${A('justify', '☰', '양쪽')}
+        <span class="lbl">스타일</span>
+        ${B('bold', '굵게')}${B('italic', '기울임')}${B('underline', '밑줄')}${B('strike', '취소선')}${B('outline', '외곽선')}
+      </div>
+      <div class="row">
+        <span class="lbl">정렬</span>
+        ${A('left', '왼쪽 정렬')}${A('center', '가운데 정렬')}${A('right', '오른쪽 정렬')}${A('justify', '양쪽 정렬')}
       </div>
       <div class="sub-h">내 폰트 추가</div>
       <div class="row">
@@ -230,8 +309,8 @@ function SizeSec({ s }) {
 
 function TypeSec({ s }) {
   const L = s.label;
-  const save = () => {
-    const name = prompt('타이포 프리셋 이름', `${fontById(L.fontId, s.customFonts).name} 프리셋`);
+  const save = async () => {
+    const name = await askText('타이포 프리셋 이름을 정해주세요', `${fontById(L.fontId, s.customFonts).name} 프리셋`, { title: '타이포 프리셋' });
     if (!name) return;
     const p = { id: uid(), name, fontId: L.fontId, sizeMode: L.sizeMode, sizePt: L.sizePt, tracking: L.tracking, leading: L.leading, widthScale: L.widthScale };
     store.set(st => ({ ...st, typePresets: [...st.typePresets, p] }));
@@ -263,24 +342,83 @@ function TypeSec({ s }) {
     <//>`;
 }
 
-const FRAMES = [['none', '없음', ''], ['solid', '실선', 'border:1.5px solid'], ['dotted', '점선', 'border:1.5px dotted'], ['double', '이중', 'border:3px double']];
-const SPECIAL = [['▶❚❚', '뮤직'], ['💬', '메신저'], ['◉▭', '도그태그'], ['▦', '원고지'], ['◖ ◗', '말풍선'], ['☺◖', '말풍선(캐릭터)'], ['⛩', '오마모리']];
+const FRAMES = [['none', '없음', ''], ['solid', '실선', 'border:1px solid'], ['dotted', '점선', 'border:1px dotted'], ['double', '이중', 'border:3px double']];
+const SPECIAL = [['music', '▶❚❚', '뮤직'], ['messenger', '💬', '메신저'], ['dogtag', '◉▭', '도그태그'], ['wongoji', '▦', '원고지'], ['bubble', '◖ ◗', '말풍선'], ['bubble2', '☺◖', '말풍선(캐릭터)'], ['omamori', '⛩', '오마모리'], ['notebook', '⁘▭', '수첩']];
+const SPECIAL_DEFAULT_TEXT = {
+  music: '노래 제목\n아티스트', messenger: '자도 자도\n계속 자고 싶어요…', dogtag: 'NAME : 콩이\nID : 0412-HWY',
+  wongoji: '오늘의 일기', bubble: '소녀가 되…', bubble2: '자도 자도\n계속 자고 싶어요…', omamori: '행운가득', notebook: '내일 일은 난 몰라',
+};
+const CAN_VERTICAL = { dogtag: true, wongoji: true }; // 세로형 지원 특수 프레임
+const BUBBLE_STYLES = [['round', '심플'], ['corner', '모서리 뾰족'], ['cloud', '구름']];
 function FrameSec({ s }) {
   const L = s.label;
+  const m = L.music || {};
+  const setMusic = p => setLabel({ music: { ...m, ...p } });
+  const bub = L.bubble || {};
+  const setBub = p => setLabel({ bubble: { ...bub, ...p } });
+  const pickSpecial = v => setLabel(l => {
+    if (l.frame === v) return { frame: 'none' };
+    const patch = { frame: v, orientation: CAN_VERTICAL[v] && l.orientation === 'v' ? 'v' : 'h' };
+    const minTape = { music: 24, dogtag: 18, bubble2: 18, bubble: 12, omamori: 12 }[v];
+    if (minTape && l.tapeMm < minTape) patch.tapeMm = minTape;
+    // 기존 일반 라벨 텍스트면 프레임에 맞는 예시로 채움
+    if (!SPECIAL_DEFAULT_TEXT[l.frame] && (v === 'music' || v === 'messenger' || v === 'dogtag') && !l.text.includes('\n')) patch.text = SPECIAL_DEFAULT_TEXT[v];
+    if (!l.text.trim()) patch.text = SPECIAL_DEFAULT_TEXT[v];
+    return patch;
+  });
   return html`
     <${Sec} title="Frame" sub="프레임">
       <div class="tiles" style="margin-bottom:6px">
         ${FRAMES.map(([v, t, st]) => html`<button class=${'tile' + (L.frame === v ? ' on' : '')} onClick=${() => setLabel({ frame: v })}><span style=${st + ';padding:2px 6px'}>${t}</span></button>`)}
       </div>
-      <div class="sub-h">Special · 준비 중</div>
+      <div class="sub-h">Special</div>
       <div class="tiles">
-        ${SPECIAL.map(([i, t]) => html`<button class="tile" disabled title="곧 추가돼요">${i}<br/>${t}</button>`)}
+        ${SPECIAL.map(([v, i, t]) => html`<button class=${'tile' + (v && L.frame === v ? ' on' : '')} disabled=${!v} title=${v ? t : '준비 중'} onClick=${() => v && pickSpecial(v)}>${i}<br/>${t}</button>`)}
       </div>
+      ${L.frame === 'music' ? html`
+        <div class="opt-box">
+          <div class="row"><span class="lbl">시간</span>
+            <input class="num" value=${m.cur} onInput=${e => setMusic({ cur: e.target.value })} />
+            <input class="num" value=${m.remain} onInput=${e => setMusic({ remain: e.target.value })} />
+          </div>
+          <${Range} label="진행" min=${0} max=${1} step=${0.01} value=${m.progress ?? 0.8} onInput=${v => setMusic({ progress: v })} fmt=${v => Math.round(v * 100) + '%'} />
+          <div class="muted">첫 줄 제목 · 둘째 줄 아티스트 · 커버는 DECO의 MAIN</div>
+        </div>` : null}
+      ${L.frame === 'bubble' || L.frame === 'bubble2' || L.frame === 'messenger' ? html`
+        <div class="opt-box">
+          <div class="row"><span class="lbl">말풍선</span>
+            <${Toggle} value=${bub.style || 'round'} onChange=${v => setBub({ style: v })} options=${BUBBLE_STYLES} />
+          </div>
+          ${L.frame === 'bubble' && (bub.style || 'round') === 'round' ? html`
+            <div class="row"><span class="lbl">꼬리</span>
+              <${Toggle} value=${bub.tail || 'corner'} onChange=${v => setBub({ tail: v })} options=${[['corner', '모서리'], ['center', '가운데']]} />
+            </div>` : null}
+          ${L.frame === 'bubble2' ? html`
+            <div class="row"><span class="lbl">캐릭터</span>
+              <${Toggle} value=${bub.charSide || 'left'} onChange=${v => setBub({ charSide: v })} options=${[['left', '왼쪽'], ['right', '오른쪽']]} />
+            </div>
+            <div class="row"><label class="check"><input type="checkbox" checked=${!!bub.bleed} onChange=${e => setBub({ bleed: e.target.checked })} /> 말풍선이 테두리 밖으로</label></div>
+            <div class="muted">캐릭터는 DECO의 CHAR</div>` : null}
+        </div>` : null}
+      ${L.frame === 'omamori' ? html`
+        <div class="opt-box">
+          <div class="row"><span class="lbl">스타일</span>
+            <${Toggle} value=${L.omamori?.style || 'vertical'} onChange=${v => setLabel({ omamori: { ...(L.omamori || {}), style: v } })}
+              options=${[['vertical', '세로 글씨'], ['charm', '그림 + 가로 글씨']]} />
+          </div>
+          <div class="muted">${(L.omamori?.style || 'vertical') === 'charm' ? '가운데 그림은 DECO의 CHARM' : '줄마다 세로 한 줄 · 아래 장식은 DECO의 CHARM'}</div>
+        </div>` : null}
+      ${L.frame === 'messenger' ? html`
+        <div class="opt-box">
+          <div class="row"><span class="lbl">첫 말풍선</span>
+            <${Toggle} value=${L.messenger?.start || 'left'} onChange=${v => setLabel({ messenger: { ...(L.messenger || {}), start: v } })} options=${[['left', '상대 (왼쪽)'], ['right', '나 (오른쪽)']]} />
+          </div>
+        </div>` : null}
     <//>`;
 }
 
-const PATTERNS = [['none', '없음', ''], ['check', '', 'background-image:linear-gradient(90deg,rgba(47,44,48,.15) 50%,transparent 50%),linear-gradient(rgba(47,44,48,.15) 50%,transparent 50%);background-size:8px 8px'],
-  ['stripe', '', 'background-image:repeating-linear-gradient(90deg,transparent 0 5px,rgba(47,44,48,.18) 5px 7px)'],
+const PATTERNS = [['none', '없음', ''], ['check', '', 'background-image:linear-gradient(90deg,rgba(47,44,48,.08) 50%,transparent 50%),linear-gradient(rgba(47,44,48,.08) 50%,transparent 50%);background-size:8px 8px'],
+  ['stripe', '', 'background-image:repeating-linear-gradient(90deg,transparent 0 5px,rgba(47,44,48,.1) 5px 7px)'],
   ['dot', '', 'background-image:radial-gradient(rgba(47,44,48,.35) 1px,transparent 1.3px);background-size:5px 5px'],
   ['diag', '', 'background-image:repeating-linear-gradient(45deg,transparent 0 4px,rgba(47,44,48,.2) 4px 5px)']];
 function PatternSec({ s }) {
@@ -292,52 +430,125 @@ function PatternSec({ s }) {
     <//>`;
 }
 
+const BM_MODES = [['halftone', '하프톤 (점)'], ['dither', '디더 (오차확산)'], ['bayer', '디더 (격자)'], ['threshold', '흑백 (임계값)']];
+function BitmapMaker({ onDone }) {
+  const fileRef = useRef();
+  const pvRef = useRef();
+  const [img, setImg] = useState(null);
+  const [o, setO] = useState({ cols: 48, mode: 'halftone', threshold: 128, contrast: 1.2, invert: false });
+  const rows = useMemo(() => img ? toBitmap(img, o) : null, [img, o]);
+  useEffect(() => {
+    if (!rows || !pvRef.current) return;
+    const cell = Math.max(1, Math.floor(240 / Math.max(rows[0].length, rows.length)));
+    const cv = rowsToCanvas(rows, cell);
+    const c = pvRef.current;
+    c.width = cv.width; c.height = cv.height;
+    c.getContext('2d').drawImage(cv, 0, 0);
+  }, [rows]);
+  const set = p => setO(x => ({ ...x, ...p }));
+  const onFile = async e => {
+    const f = e.target.files[0]; e.target.value = '';
+    if (!f) return;
+    try { setImg(await loadImageFile(f)); } catch { toast('이미지를 읽지 못했어요'); }
+  };
+  return html`
+    <div class="row" style="margin-top:8px">
+      <button class="btn" onClick=${() => fileRef.current.click()}>📷 이미지 → 비트맵</button>
+      <input type="file" accept="image/*" ref=${fileRef} style="display:none" onChange=${onFile} />
+    </div>
+    ${img ? html`
+      <div class="opt-box">
+        <div class="bm-pv"><canvas ref=${pvRef}></canvas></div>
+        <div class="row"><span class="lbl">방식</span>
+          <select class="pill" value=${o.mode} onChange=${e => set({ mode: e.target.value })}>
+            ${BM_MODES.map(([v, t]) => html`<option value=${v}>${t}</option>`)}
+          </select>
+        </div>
+        <${Range} label="해상도" min=${16} max=${128} step=${4} value=${o.cols} onInput=${v => set({ cols: v })} fmt=${v => v + 'px'} />
+        <${Range} label="밝기" min=${40} max=${220} value=${o.threshold} onInput=${v => set({ threshold: v })} />
+        <${Range} label="대비" min=${0.5} max=${3} step=${0.1} value=${o.contrast} onInput=${v => set({ contrast: v })} fmt=${v => v.toFixed(1)} />
+        <div class="row">
+          <label class="check"><input type="checkbox" checked=${o.invert} onChange=${e => set({ invert: e.target.checked })} /> 반전</label>
+          <span style="flex:1"></span>
+          <button class="btn" onClick=${() => setImg(null)}>취소</button>
+          <button class="btn on" onClick=${() => { onDone(rows); setImg(null); }}>넣기</button>
+        </div>
+      </div>` : null}`;
+}
+
 function DecoSec({ s }) {
   const L = s.label;
   const hero = L.hero || { icon: null, textPos: 'bottom', size: 0.62 };
   const vert = L.orientation === 'v';
-  const slot = vert && s.ui.decoSlot === 'hero' ? 'left' : s.ui.decoSlot;
-  const names = { top: '위', bottom: '아래', left: '왼쪽', right: '오른쪽', hero: '메인 그림' };
-  const D = (k, ch) => html`<button class=${(L.deco[k] ? 'has' : '') + (slot === k ? ' cur' : '')} onClick=${() => setUi({ decoSlot: k })} title=${names[k]}>${ch}</button>`;
+  // 특수 프레임: 가장자리 장식은 안 쓰고, 일부는 가운데 칸을 커버/캐릭터/부적으로 씀
+  const HERO_SLOT = { music: ['COVER', '앨범 커버'], bubble2: ['CHAR', '캐릭터'], omamori: ['CHARM', '아래 장식'] };
+  const special = isSpecialFrame(L.frame);
+  const heroSlot = HERO_SLOT[L.frame];
+  const music = special; // (이름 유지) 특수 프레임이면 가장자리 장식 비활성
+  const noHero = (special && !heroSlot) || (!special && vert);
+  const slot = special ? 'hero' : (vert && s.ui.decoSlot === 'hero' ? 'left' : s.ui.decoSlot);
+  const names = { top: '위', bottom: '아래', left: '왼쪽', right: '오른쪽', hero: heroSlot ? heroSlot[1] : '메인 그림' };
+  const D = (k, ch) => html`<button class=${(L.deco[k] ? 'has' : '') + (slot === k ? ' cur' : '')} disabled=${music} onClick=${() => setUi({ decoSlot: k })} title=${names[k]}>${ch}</button>`;
   const cur = slot === 'hero' ? hero.icon : L.deco[slot];
   const pick = n => setLabel(l => slot === 'hero'
     ? { hero: { ...hero, icon: hero.icon === n ? null : n } }
     : { deco: { ...l.deco, [slot]: l.deco[slot] === n ? null : n } });
   const setHero = p => setLabel({ hero: { ...hero, ...p } });
-  const list = ICON_GROUPS[s.ui.iconGroup] || ICON_GROUPS['동물'];
+  const groups = { ...ICON_GROUPS, ...(s.customIcons.length ? { '내 이미지': s.customIcons.map(i => i.id) } : {}) };
+  const group = groups[s.ui.iconGroup] ? s.ui.iconGroup : '동물';
+  const list = groups[group];
   const sideName = vert ? '좌/우' : '위/아래';
+  const ds = L.decoScale || 1;
+  const addBitmap = rows => {
+    const id = 'img_' + uid();
+    store.set(st => {
+      const customIcons = [...st.customIcons, { id, name: `이미지 ${st.customIcons.length + 1}`, rows }];
+      const label = slot === 'hero' ? { ...st.label, hero: { ...hero, icon: id } } : { ...st.label, deco: { ...st.label.deco, [slot]: id } };
+      return { ...st, customIcons, label, ui: { ...st.ui, iconGroup: '내 이미지' } };
+    });
+  };
+  const delCustom = async () => {
+    if (!cur || !cur.startsWith('img_')) return;
+    if (!(await askConfirm('imageDelete', '이 이미지를 목록에서 지울까요?\n이미 서랍에 넣은 라벨에서도 사라져요.', { title: '이미지 삭제', ok: '지우기' }))) return;
+    store.set(st => ({ ...st, customIcons: st.customIcons.filter(i => i.id !== cur), label: { ...st.label, hero: st.label.hero?.icon === cur ? { ...st.label.hero, icon: null } : st.label.hero, deco: Object.fromEntries(Object.entries(st.label.deco).map(([k, v]) => [k, v === cur ? null : v])) } }));
+  };
   return html`
     <${Sec} title="Deco" sub="장식 · 메인 그림">
       <div class="row" style="align-items:flex-start;gap:12px">
         <div class="dpad">
           <span></span>${D('top', '↑')}<span></span>
           ${D('left', '←')}
-          <button class=${'c' + (hero.icon && !vert ? ' has' : '') + (slot === 'hero' ? ' cur' : '')} disabled=${vert} title="메인 그림" onClick=${() => setUi({ decoSlot: 'hero' })}>MAIN</button>
+          <button class=${'c' + (hero.icon && !noHero ? ' has' : '') + (slot === 'hero' && !noHero ? ' cur' : '')} disabled=${noHero} title=${names.hero} onClick=${() => setUi({ decoSlot: 'hero' })}>${heroSlot ? heroSlot[0] : 'MAIN'}</button>
           ${D('right', '→')}
           <span></span>${D('bottom', '↓')}<span></span>
         </div>
         <div style="flex:1;font-size:10px;line-height:1.6">
-          <b>${names[slot]}</b> → 아이콘 클릭<br/>
-          <label class="check"><input type="checkbox" checked=${!!L.decoRepeat} onChange=${e => setLabel({ decoRepeat: e.target.checked })} /> ${sideName} 반복</label>
+          ${special && !heroSlot ? html`<span class="muted">이 프레임은 장식 없음</span><br/>` : html`<b>${names[slot]}</b> → 아이콘 클릭<br/>`}
+          ${!music ? html`
+            <label class="check"><input type="checkbox" checked=${!!L.decoRepeat} onChange=${e => setLabel({ decoRepeat: e.target.checked })} /> ${sideName} 반복</label>
+            <div class="row" style="margin:4px 0 0;gap:3px"><span>크기</span>
+              <button class="btn sq" onClick=${() => setLabel({ decoScale: Math.max(0.4, +(ds - 0.1).toFixed(2)) })}>−</button>
+              <span style="width:34px;text-align:center">${Math.round(ds * 100)}%</span>
+              <button class="btn sq" onClick=${() => setLabel({ decoScale: Math.min(1.6, +(ds + 0.1).toFixed(2)) })}>+</button>
+            </div>` : null}
           <div style="margin-top:4px"><button class="btn" onClick=${() => setLabel({ deco: { top: null, bottom: null, left: null, right: null }, hero: { ...hero, icon: null } })}>모두 빼기</button></div>
         </div>
       </div>
-      ${slot === 'hero' ? html`
+      ${slot === 'hero' && !music ? html`
         <div class="row"><span class="lbl">글자</span>
           <${Toggle} value=${hero.textPos} onChange=${v => setHero({ textPos: v })} options=${[['bottom', '그림 아래'], ['top', '그림 위']]} />
         </div>
         <${Range} label="그림 크기" min=${0.3} max=${0.85} step=${0.01} value=${hero.size} onInput=${v => setHero({ size: v })} fmt=${v => Math.round(v * 100) + '%'} />` : null}
       <div class="row">
-        <select class="pill" value=${s.ui.iconGroup} onChange=${e => setUi({ iconGroup: e.target.value })}>
-          ${Object.keys(ICON_GROUPS).map(g => html`<option value=${g}>${g}</option>`)}
+        <select class="pill" value=${group} onChange=${e => setUi({ iconGroup: e.target.value })}>
+          ${Object.keys(groups).map(g => html`<option value=${g}>${g}</option>`)}
         </select>
+        ${group === '내 이미지' && cur && cur.startsWith('img_') ? html`<button class="btn" onClick=${delCustom}>✕ 선택 이미지 삭제</button>` : null}
       </div>
       <div class="lib">
-        ${list.map(n => html`<button class=${cur === n ? 'on' : ''} title=${n} onClick=${() => pick(n)}><${Px} name=${n} s=${2} c="#fff" /></button>`)}
+        ${list.map(n => html`<button class=${cur === n ? 'on' : ''} title=${n} onClick=${() => pick(n)}><${Px} name=${n} s=${2} c="#fff" fit=${26} /></button>`)}
       </div>
-      <div class="row" style="margin-top:8px">
-        <button class="btn" disabled title="곧 추가돼요">📷 이미지 → 비트맵 (준비 중)</button>
-      </div>
+      <${BitmapMaker} onDone=${addBitmap} />
     <//>`;
 }
 
@@ -351,8 +562,8 @@ function EmojiSec({ s, taRef }) {
     setLabel({ text });
     requestAnimationFrame(() => { if (ta) { ta.focus(); ta.selectionStart = ta.selectionEnd = a + t.length; } });
   };
-  const addFav = () => {
-    const t = prompt('즐겨찾기에 넣을 이모티콘/기호');
+  const addFav = async () => {
+    const t = await askText('즐겨찾기에 넣을 이모티콘이나 기호', '', { title: '즐겨찾기 추가', ok: '추가' });
     if (t) store.set(st => ({ ...st, kaomojiFav: [...st.kaomojiFav, t] }));
   };
   const onFav = (e, t, i) => {
@@ -456,22 +667,45 @@ function Center({ s, fv }) {
   const back = () => modItem((items, i) => { const [x] = items.splice(i, 1); items.unshift(x); return items; });
 
   const drag = useRef(null);
-  const onDown = (e, it) => {
+  const dims = it => { const L = byId[it.id]; const im = L ? labelImage(L, s.customFonts, ppm) : { w: 0, h: 0 }; return im; };
+  const startDrag = (e, it, mode) => {
     e.preventDefault();
+    e.stopPropagation();
     setUi({ boardSel: it.id });
-    drag.current = { id: it.id, sx: e.clientX, sy: e.clientY, x: it.x, y: it.y };
-    e.target.setPointerCapture(e.pointerId);
+    const el = e.currentTarget.closest('.item');
+    const r = el.getBoundingClientRect();
+    const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    const im = dims(it);
+    drag.current = { mode, id: it.id, sx: e.clientX, sy: e.clientY, x: it.x, y: it.y, s: it.s || 1, rot: it.rot || 0, cx, cy, w: im.w, h: im.h,
+      d0: Math.hypot(e.clientX - cx, e.clientY - cy) || 1, a0: Math.atan2(e.clientY - cy, e.clientX - cx) };
+    e.currentTarget.setPointerCapture(e.pointerId);
   };
   const onMove = e => {
     const d = drag.current;
     if (!d) return;
-    const nx = d.x + (e.clientX - d.sx) / scale, ny = d.y + (e.clientY - d.sy) / scale;
-    store.set(st => ({ ...st, board: { ...st.board, layout: 'free', items: st.board.items.map(x => x.id === d.id ? { ...x, x: nx, y: ny } : x) } }));
+    let patch;
+    if (d.mode === 'move') {
+      patch = { x: d.x + (e.clientX - d.sx) / scale, y: d.y + (e.clientY - d.sy) / scale };
+    } else if (d.mode === 'resize') {
+      const ns = Math.min(5, Math.max(0.2, d.s * Math.hypot(e.clientX - d.cx, e.clientY - d.cy) / d.d0));
+      const bcx = d.x + d.w * d.s / 2, bcy = d.y + d.h * d.s / 2;
+      patch = { s: ns, x: bcx - d.w * ns / 2, y: bcy - d.h * ns / 2 };
+    } else {
+      let rot = d.rot + (Math.atan2(e.clientY - d.cy, e.clientX - d.cx) - d.a0) * 180 / Math.PI;
+      if (e.shiftKey) rot = Math.round(rot / 15) * 15;
+      patch = { rot: Math.round(rot * 10) / 10 };
+    }
+    store.set(st => ({ ...st, board: { ...st.board, layout: 'free', items: st.board.items.map(x => x.id === d.id ? { ...x, ...patch } : x) } }));
   };
   const onUp = () => { drag.current = null; };
 
   const bgCls = { mat: 'bg-mat', grid: 'bg-grid', trans: 'bg-trans' }[board.bg] || '';
-  const bgStyle = board.bg === 'plain' ? `background:${board.bgColor}` : board.bg === 'image' && board.bgImage ? `background:url(${board.bgImage}) center/cover` : '';
+  // 판 비율과 상관없이 칸이 정사각형으로 보이도록 px 단위로 지정
+  const sq = f => `${board.w * f * scale}px ${board.w * f * scale}px`;
+  const bgStyle = board.bg === 'plain' ? `background:${board.bgColor}`
+    : board.bg === 'image' && board.bgImage ? `background:url(${board.bgImage}) center/cover`
+    : board.bg === 'mat' ? `background-size:${sq(0.1)},${sq(0.1)},${sq(0.025)},${sq(0.025)}`
+    : board.bg === 'grid' ? `background-size:${sq(0.03)},${sq(0.03)}` : '';
   const ppm = BOARD_PPM * (board.scale || 1);
   return html`
     <main class="center">
@@ -490,16 +724,21 @@ function Center({ s, fv }) {
         <button class="btn sq" onClick=${() => setUi({ zoom: Math.min(4, (s.ui.zoom || 1) + 0.25) })}>+</button>
       </div>
       <div class="board-wrap" ref=${wrapRef} onPointerDown=${e => { if (e.target === e.currentTarget) setUi({ boardSel: null }); }}>
-        <div class="hint">board · ${board.w}×${board.h} — 드래그로 이동, 선택 후 툴바로 회전·순서</div>
         <div class=${'board ' + bgCls} style=${`width:${board.w * scale}px;height:${board.h * scale}px;${bgStyle}`}
-             onPointerMove=${onMove} onPointerUp=${onUp} onPointerDown=${e => { if (e.target === e.currentTarget) setUi({ boardSel: null }); }}>
+             onPointerMove=${onMove} onPointerUp=${onUp} onPointerCancel=${onUp} onLostPointerCapture=${onUp} onPointerDown=${e => { if (e.target === e.currentTarget) setUi({ boardSel: null }); }}>
           ${board.items.map(it => {
             const L = byId[it.id];
             if (!L) return null;
             const im = labelImage(L, s.customFonts, ppm);
-            return html`<img class="item" key=${it.id} src=${im.url} draggable="false"
-              style=${`left:${it.x * scale}px;top:${it.y * scale}px;width:${im.w * scale}px;height:${im.h * scale}px;transform:rotate(${it.rot || 0}deg);${sel === it.id ? 'outline:1.5px dashed #fff;outline-offset:4px;' : ''}`}
-              onPointerDown=${e => onDown(e, it)} />`;
+            const k = (it.s || 1) * scale;
+            return html`<div class=${'item' + (sel === it.id ? ' sel' : '')} key=${it.id}
+              style=${`left:${it.x * scale}px;top:${it.y * scale}px;width:${im.w * k}px;height:${im.h * k}px;transform:rotate(${it.rot || 0}deg)`}
+              onPointerDown=${e => startDrag(e, it, 'move')}>
+              <img src=${im.url} draggable="false" />
+              ${sel === it.id ? html`
+                <span class="hdl rt" title="회전 (shift: 15°씩)" onPointerDown=${e => startDrag(e, it, 'rotate')}></span>
+                <span class="hdl rs" title="크기" onPointerDown=${e => startDrag(e, it, 'resize')}></span>` : null}
+            </div>`;
           })}
           ${!drawer.length ? html`<div class="empty">서랍이 비어 있어요<br/>왼쪽에서 라벨을 만들고 [서랍에 넣기]</div>` : null}
         </div>
@@ -518,8 +757,8 @@ function Drawer({ s }) {
     const next = { ...st, drawer };
     return { ...next, board: syncBoard(next) };
   });
-  const del = L => {
-    if (!confirm('이 라벨을 서랍에서 뺄까요?')) return;
+  const del = async L => {
+    if (!(await askConfirm('drawerDelete', '이 라벨을 서랍에서 뺄까요?', { title: '라벨 삭제', ok: '빼기' }))) return;
     store.set(st => {
       const next = { ...st, drawer: st.drawer.filter(d => d.id !== L.id), selected: st.selected.filter(x => x !== L.id), editingId: st.editingId === L.id ? null : st.editingId };
       return { ...next, board: syncBoard(next) };
@@ -563,10 +802,11 @@ function Drawer({ s }) {
 function BoardSec({ s }) {
   const b = s.board;
   const fileRef = useRef();
-  const setSize = k => {
-    const [w, h] = BOARD_SIZES[k];
-    store.set(st => { const nb = { ...st.board, size: k, w, h }; return { ...st, board: syncBoard({ ...st, board: nb.layout === 'auto' ? nb : { ...nb, layout: 'auto' } }) }; });
+  const setSize = (k, landscape = b.landscape) => {
+    const { w, h } = boardDims(k, landscape);
+    store.set(st => { const nb = { ...st.board, size: k, landscape, w, h, layout: 'auto' }; return { ...st, board: syncBoard({ ...st, board: nb }) }; });
   };
+  const squareBoard = BOARD_SIZES[b.size] && BOARD_SIZES[b.size][0] === BOARD_SIZES[b.size][1];
   const onImg = e => {
     const f = e.target.files[0]; e.target.value = '';
     if (!f) return;
@@ -584,6 +824,9 @@ function BoardSec({ s }) {
             ${Object.entries(BOARD_SIZES).map(([k, v]) => html`<option value=${k}>${v[2]}</option>`)}
           </select>
         </div>
+        ${!squareBoard ? html`<div class="row"><span class="lbl">방향</span>
+          <${Toggle} value=${!!b.landscape} onChange=${v => setSize(b.size, v)} options=${[[false, '세로'], [true, '가로']]} />
+        </div>` : null}
         <div class="bgs">
           ${BG.map(([v, cls, t]) => html`<button class=${cls + (b.bg === v ? ' on' : '')} title=${t} style=${v === 'plain' ? 'background:' + b.bgColor : ''} onClick=${() => setBoard({ bg: v })}></button>`)}
           <button class=${b.bg === 'image' ? 'on' : ''} title="이미지 업로드" style=${b.bgImage ? `background:url(${b.bgImage}) center/cover` : 'border-style:dashed'} onClick=${() => fileRef.current.click()}>${b.bgImage ? '' : '⤒'}</button>
@@ -613,16 +856,16 @@ function PaletteSec({ s }) {
     const p = s.palettePresets.find(x => x.id === id);
     if (p) store.set(st => ({ ...st, palette: [...p.colors], palettePresetId: id }));
   };
-  const register = () => {
-    const name = prompt('컬러 프리셋 이름', `팔레트 ${s.palettePresets.length + 1}`);
+  const register = async () => {
+    const name = await askText('컬러 프리셋 이름을 정해주세요', `팔레트 ${s.palettePresets.length + 1}`, { title: '컬러 프리셋' });
     if (!name) return;
     const p = { id: uid(), name, colors: [...s.palette] };
     store.set(st => ({ ...st, palettePresets: [...st.palettePresets, p], palettePresetId: p.id }));
     toast('컬러 프리셋을 등록했어요');
   };
-  const remove = () => {
+  const remove = async () => {
     if (s.palettePresetId === 'custom') return;
-    if (!confirm('이 컬러 프리셋을 지울까요?')) return;
+    if (!(await askConfirm('paletteDelete', '이 컬러 프리셋을 지울까요?', { title: '프리셋 삭제', ok: '지우기' }))) return;
     store.set(st => ({ ...st, palettePresets: st.palettePresets.filter(p => p.id !== st.palettePresetId), palettePresetId: 'custom' }));
   };
   const L = s.label;
@@ -729,6 +972,7 @@ function Right({ s }) {
 // ---------------- APP ----------------
 function App() {
   const s = useStore();
+  setCustomIcons(s.customIcons || []);
   const fv = useFontsV();
   const [saveState, setSaveState] = useState('saved');
   useEffect(() => store.onSave(setSaveState), []);
@@ -763,9 +1007,11 @@ function App() {
       <a href="#" onClick=${e => { e.preventDefault(); doExport(); }}>BACKUP</a>
       <a href="#" onClick=${e => { e.preventDefault(); backupRef.current.click(); }}>RESTORE</a>
       <a href="https://github.com/xngsuii/hwy-label" target="_blank" rel="noopener">GITHUB</a>
+      ${Object.keys(s.ui.skipConfirm || {}).length ? html`<a href="#" title="'다음부터 묻지 않기'로 끈 확인창을 다시 켜요" onClick=${e => { e.preventDefault(); setUi({ skipConfirm: {} }); toast('확인창을 다시 켰어요'); }}>ASK AGAIN</a>` : null}
       <input type="file" accept="application/json" ref=${backupRef} style="display:none" onChange=${doImport} />
     </div>
-    <div class="foot">FONTS · GALMURI · LIMGUL · DUNGGEUNMO · DOSGOTHIC · CHOSUN · GMARKET SANS · PRETENDARD</div>`;
+    <div class="foot">FONTS · GALMURI · LIMGUL · DUNGGEUNMO · DOSGOTHIC · CHOSUN · GMARKET SANS · PRETENDARD</div>
+    <${Dialog} />`;
 }
 
 (async () => {

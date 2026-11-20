@@ -139,7 +139,26 @@ input[type=range]{flex:1;min-width:60px;accent-color:var(--ink);height:14px}
 .board-wrap{flex:1;overflow:auto;display:flex;flex-direction:column;align-items:center;padding:18px;min-height:0}
 .hint{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-2);padding:0 0 10px;text-align:center}
 .board{position:relative;overflow:hidden;border:1.5px solid var(--line);box-shadow:4px 4px 0 rgba(47,44,48,.2);flex:none}
-.board .item{position:absolute;transform-origin:center;filter:drop-shadow(1px 2px 0 rgba(0,0,0,.35));cursor:grab;user-select:none;-webkit-user-drag:none}
+.board .item{position:absolute;transform-origin:center;cursor:grab;user-select:none;touch-action:none}
+.board .item img{display:block;width:100%;height:100%;pointer-events:none;filter:drop-shadow(1px 2px 0 rgba(0,0,0,.35));-webkit-user-drag:none}
+.board .item.sel{outline:1.5px dashed #fff;outline-offset:4px;z-index:5}
+.hdl{position:absolute;width:11px;height:11px;background:#fff;border:1.5px solid var(--ink);touch-action:none}
+.hdl.rs{right:-10px;bottom:-10px;cursor:nwse-resize}
+.hdl.rt{left:50%;top:-30px;margin-left:-6px;border-radius:50%;cursor:grab}
+.hdl.rt::after{content:"";position:absolute;left:50%;top:10px;width:1.5px;height:14px;background:#fff;margin-left:-1px}
+.dlg-back{position:fixed;inset:0;z-index:100;display:grid;place-items:center;padding:16px;
+  background:rgba(47,44,48,.35);background-image:radial-gradient(rgba(255,255,255,.25) 1px,transparent 1.4px);background-size:6px 6px}
+.dlg{width:min(330px,100%);background:var(--white);border:1.5px solid var(--line);box-shadow:5px 5px 0 rgba(47,44,48,.35)}
+.dlg .h .x{border:0;background:none;cursor:pointer;font-size:11px;padding:0 0 0 6px}
+.dlg .body{padding:14px 14px 12px}
+.dlg-msg{display:flex;gap:12px;align-items:center;margin-bottom:12px}
+.dlg-msg p{margin:0;font-size:12px;line-height:1.6;white-space:pre-line}
+.dlg-skip{margin:0 0 12px}
+.dlg-btns{display:flex;gap:6px;justify-content:flex-end}
+.dlg-btns .btn{padding:4px 14px}
+.opt-box{border:1px dashed var(--line);padding:8px;margin-top:8px;background:var(--paper)}
+.bm-pv{display:grid;place-items:center;background:#fff;border:1px solid var(--line);margin-bottom:8px;padding:6px;max-height:260px;overflow:auto}
+.bm-pv canvas{image-rendering:pixelated;max-width:100%}
 .board .empty{position:absolute;inset:0;display:grid;place-items:center;color:rgba(255,255,255,.7);font-family:var(--px);font-size:13px;text-align:center;line-height:1.6}
 .bg-mat{background-color:#252327;
   background-image:linear-gradient(rgba(255,255,255,.18) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.18) 1px,transparent 1px),

@@ -39,7 +39,7 @@ export const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toS
 
 export const DEFAULT_PALETTE = ['#FFFEFB', '#F6EBA6', '#F5CFDD', '#CFE6B8', '#D5E6F3', '#2F2C30'];
 
-export const TAPE_WIDTHS = [4, 6, 9, 12, 18, 24, 36, 50];
+export const TAPE_WIDTHS = [4, 6, 9, 12, 18, 24, 36];
 
 export function defaultLabel() {
   return {
@@ -64,6 +64,11 @@ export function defaultLabel() {
     pattern: 'none',       // none | check | stripe | dot | diag
     deco: { left: 'bear', right: 'bone', top: null, bottom: null },
     decoRepeat: false,     // 가장자리 장식 반복
+    decoScale: 1,          // 장식 크기 배율
+    music: { cur: '2:25', remain: '-0:38', progress: 0.8 },
+    messenger: { start: 'left' }, // 첫 말풍선: left(상대) | right(나)
+    bubble: { style: 'round', tail: 'corner', charSide: 'left', bleed: false },
+    omamori: { style: 'vertical' }, // vertical(세로 글씨) | charm(그림 + 가로 글씨)   // 말풍선: round(심플) | corner(모서리 뾰족) | cloud(구름)
     hero: { icon: null, textPos: 'bottom', size: 0.62 }, // 메인 그림
     tapeColor: '#F6EBA6',
     inkColor: '#2F2C30',
@@ -78,14 +83,15 @@ export function defaultState() {
     editingId: null,          // 서랍에서 불러와 편집 중인 라벨 id
     drawer: [],               // Label[]
     selected: [],             // 선택된 라벨 id
-    board: { size: '1080x1080', w: 1080, h: 1080, bg: 'mat', bgColor: '#ffffff', bgImage: null, scale: 0.6, items: [], layout: 'auto' },
+    customIcons: [],          // 이미지→비트맵으로 만든 아이콘 {id,name,rows}
+    board: { size: '1080x1080', landscape: false, w: 1080, h: 1080, bg: 'mat', bgColor: '#ffffff', bgImage: null, scale: 0.6, items: [], layout: 'auto' },
     palette: [...DEFAULT_PALETTE],
     palettePresetId: 'custom',
     palettePresets: [],       // {id,name,colors}
     typePresets: [],          // {id,name,fontId,sizeMode,sizePt,tracking,leading,widthScale}
     kaomojiFav: [],
     customFonts: [],          // 메타데이터만 (blob은 idb 'fonts')
-    ui: { decoSlot: 'left', iconGroup: '동물', printMode: 'board', dpi: 300, transparent: false, zoom: 0, emojiOpen: false, colorTarget: 'tapeColor', paletteEdit: false },
+    ui: { decoSlot: 'left', iconGroup: '동물', printMode: 'board', dpi: 300, transparent: false, zoom: 0, emojiOpen: false, colorTarget: 'tapeColor', paletteEdit: false, skipConfirm: {} },
   };
 }
 
@@ -112,7 +118,8 @@ export const store = {
       const d = defaultState();
       state = {
         ...d, ...saved,
-        label: { ...d.label, ...saved.label, deco: { ...d.label.deco, ...(saved.label?.deco || {}) }, hero: { ...d.label.hero, ...(saved.label?.hero || {}) } },
+        label: { ...d.label, ...saved.label, deco: { ...d.label.deco, ...(saved.label?.deco || {}) }, hero: { ...d.label.hero, ...(saved.label?.hero || {}) },
+          music: { ...d.label.music, ...(saved.label?.music || {}) }, messenger: { ...d.label.messenger, ...(saved.label?.messenger || {}) }, bubble: { ...d.label.bubble, ...(saved.label?.bubble || {}) }, omamori: { ...d.label.omamori, ...(saved.label?.omamori || {}) } },
         board: { ...d.board, ...saved.board },
         ui: { ...d.ui, ...saved.ui },
       };

@@ -38,6 +38,7 @@ function frameSpace(frame) {
 
 // ---------- 레이아웃 ----------
 export function layoutLabel(L, family) {
+  if (SPECIAL[L.frame]) return SPECIAL[L.frame].layout(L, family);
   const vert = L.orientation === 'v';
   const lines = (L.text || ' ').split('\n').map(l => graphemes(l));
   const n = Math.max(1, lines.length);
@@ -61,7 +62,7 @@ export function layoutLabel(L, family) {
   const crossDecoCount = crossDecoKeys.filter(k => deco[k]).length;
 
   const baseC = Math.max(1, crossSize - 2 * (fs0 + padC));
-  const cdSize = baseC * 0.2;          // 위/아래(가로형) 반복 장식 높이
+  const cdSize = baseC * 0.17 * (L.decoScale || 1); // 가장자리 장식 높이
   const cdGap = cdSize * 0.3;
   const crossDecoSpace = crossDecoCount * (cdSize + cdGap);
   let innerC = Math.max(0.5, baseC - crossDecoSpace);
@@ -112,7 +113,7 @@ export function layoutLabel(L, family) {
     const { w, h } = iconSize(name);
     if (!w) return null;
     // 아이콘을 (교차 길이 × 교차 길이) 상자 안에 비율 유지로 맞춤
-    const box = (hero ? Math.min(heroH, innerC) : Math.min(innerC, baseC)) * 0.72;
+    const box = (hero ? Math.min(heroH, innerC) : Math.min(innerC, baseC)) * 0.6 * (L.decoScale || 1);
     const cell = box / Math.max(w, h);
     const iw = w * cell, ih = h * cell;
     return { name, w: iw, h: ih, len: vert ? ih : iw };
@@ -158,6 +159,16 @@ export function renderLabel(L, family, pxPerMm = 10) {
   cv.width = W; cv.height = H;
   const ctx = cv.getContext('2d');
   const ink = L.inkColor;
+  if (SPECIAL[L.frame]) {
+    ctx.fillStyle = L.tapeColor;
+    ctx.fillRect(0, 0, W, H);
+    drawPattern(ctx, L.pattern, W, H, P, ink, false);
+    ctx.save();
+    ctx.scale(P, P); // 이후 mm 좌표로 그림
+    SPECIAL[L.frame].draw(ctx, L, family, Y, P);
+    ctx.restore();
+    return { canvas: cv, wMm: Y.wMm, hMm: Y.hMm, layout: Y };
+  }
 
   // 테이프
   ctx.fillStyle = L.tapeColor;
@@ -310,11 +321,11 @@ function drawPattern(ctx, type, W, H, P, ink, vert) {
   ctx.fillStyle = ink;
   ctx.strokeStyle = ink;
   if (type === 'check') {
-    ctx.globalAlpha = 0.1;
+    ctx.globalAlpha = 0.055;
     for (let x = 0; x < W; x += u * 2) ctx.fillRect(Math.round(x), 0, Math.round(u), H);
     for (let y = 0; y < H; y += u * 2) ctx.fillRect(0, Math.round(y), W, Math.round(u));
   } else if (type === 'stripe') {
-    ctx.globalAlpha = 0.13;
+    ctx.globalAlpha = 0.07;
     if (!vert) for (let x = 0; x < W; x += u) ctx.fillRect(Math.round(x), 0, Math.max(1, Math.round(u * 0.35)), H);
     else for (let y = 0; y < H; y += u) ctx.fillRect(0, Math.round(y), W, Math.max(1, Math.round(u * 0.35)));
   } else if (type === 'dot') {
@@ -337,3 +348,586 @@ function drawPattern(ctx, type, W, H, P, ink, vert) {
 export function canvasToBlob(cv) {
   return new Promise(res => cv.toBlob(res, 'image/png'));
 }
+
+// =====================================================================
+// 특수 프레임 (뮤직 플레이어 / 메신저). draw()는 mm 좌표계(ctx.scale(P))에서 그림.
+// =====================================================================
+function boldStr(L, family, size, weight = 700) {
+  return `${L.italic ? 'italic ' : ''}${weight} ${size}px ${fontStack(family, L.emojiMono)}`;
+}
+function textW(font100, s, size) {
+  let w = 0;
+  for (const g of graphemes(s)) w += m100(font100, g);
+  return w / 100 * size;
+}
+function iconAt(ctx, P, name, x, y, boxW, boxH, color) {
+  const { w, h } = iconSize(name);
+  if (!w) return;
+  const cell = Math.min(boxW / w, boxH / h);
+  const c = snap(cell * P);
+  const rw = w * c / P, rh = h * c / P;
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  drawIcon(ctx, name, (x + (boxW - rw) / 2) * P, (y + (boxH - rh) / 2) * P, c, color);
+  ctx.restore();
+}
+function rrect(ctx, x, y, w, h, r) {
+  r = Math.max(0, Math.min(r, w / 2, h / 2));
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+function fitText(ctx, s, x, y, maxW, font, size, align = 'left') {
+  // maxW를 넘으면 가로로 눌러서 맞춤
+  ctx.font = font;
+  const w = ctx.measureText(s).width;
+  ctx.save();
+  ctx.translate(x, y);
+  const k = w > maxW && w > 0 ? maxW / w : 1;
+  ctx.scale(k, 1);
+  ctx.textAlign = align;
+  ctx.fillText(s, 0, 0);
+  ctx.restore();
+}
+
+const MUSIC = {
+  layout(L, family) {
+    const H = L.tapeMm;
+    const [title = '', artist = ''] = (L.text || '').split('\n');
+    const pad = H * 0.09, cover = H * 0.36;
+    const fT = H * 0.13, fA = H * 0.105;
+    const textX = pad + cover + H * 0.07;
+    const tw = Math.max(textW(boldStr(L, family, 100), title, fT), textW(boldStr(L, family, 100, 400), artist, fA));
+    const need = textX + tw + H * 0.1 + H * 0.14 + pad;
+    const W = L.lengthMode === 'fixed' ? L.lengthMm : Math.max(H * 2.3, need);
+    return { special: 'music', wMm: W, hMm: H, title, artist, pad, cover, fT, fA, textX };
+  },
+  draw(ctx, L, family, Y, P) {
+    const { wMm: W, hMm: H, pad, cover, fT, fA, textX } = Y;
+    const ink = L.inkColor;
+    const m = L.music || {};
+    const lw = Math.max(1 / P, H * 0.012);
+    ctx.fillStyle = ink; ctx.strokeStyle = ink;
+    // 커버
+    rrect(ctx, pad, pad, cover, cover, H * 0.035);
+    ctx.save(); ctx.globalAlpha = 0.12; ctx.fill(); ctx.restore();
+    ctx.lineWidth = lw; ctx.stroke();
+    const icon = L.hero?.icon;
+    if (icon) iconAt(ctx, P, icon, pad + cover * 0.1, pad + cover * 0.1, cover * 0.8, cover * 0.8, ink);
+    else iconAt(ctx, P, 'note', pad + cover * 0.3, pad + cover * 0.3, cover * 0.4, cover * 0.4, ink);
+    // 제목 / 아티스트
+    const rightIcon = H * 0.14;
+    const maxW = W - textX - pad - rightIcon - H * 0.06;
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = ink;
+    fitText(ctx, Y.title, textX, pad + cover * 0.3, maxW, boldStr(L, family, fT), fT);
+    ctx.save(); ctx.globalAlpha = 0.72;
+    fitText(ctx, Y.artist, textX, pad + cover * 0.72, maxW, boldStr(L, family, fA, 400), fA);
+    ctx.restore();
+    // 음량 막대
+    const bx = W - pad - rightIcon, by = pad + cover * 0.3;
+    [0.35, 0.7, 1, 0.55, 0.8].forEach((v, i) => {
+      const bh = rightIcon * 0.7 * v, bw = rightIcon / 9;
+      ctx.save(); ctx.globalAlpha = 0.6;
+      ctx.fillRect(bx + i * bw * 1.9, by - bh / 2, bw, bh);
+      ctx.restore();
+    });
+    // 진행 바
+    const py = H * 0.6, th = Math.max(1.2 / P, H * 0.028);
+    const prog = Math.min(1, Math.max(0, m.progress ?? 0.8));
+    ctx.save(); ctx.globalAlpha = 0.25; rrect(ctx, pad, py - th / 2, W - 2 * pad, th, th / 2); ctx.fill(); ctx.restore();
+    rrect(ctx, pad, py - th / 2, (W - 2 * pad) * prog, th, th / 2); ctx.fill();
+    // 시간
+    const fTime = H * 0.075;
+    ctx.save(); ctx.globalAlpha = 0.72;
+    ctx.font = boldStr(L, family, fTime, 400);
+    ctx.textAlign = 'left'; ctx.fillText(m.cur ?? '', pad, py + H * 0.085);
+    ctx.textAlign = 'right'; ctx.fillText(m.remain ?? '', W - pad, py + H * 0.085);
+    ctx.restore();
+    // 컨트롤 ⏪ ❚❚ ⏩
+    const cy = H * 0.84, cx = W / 2, s = H * 0.11;
+    const bw = s * 0.32;
+    ctx.fillRect(cx - bw * 1.4, cy - s * 0.62, bw, s * 1.24);
+    ctx.fillRect(cx + bw * 0.4, cy - s * 0.62, bw, s * 1.24);
+    const tri = (x, dir) => {
+      ctx.beginPath();
+      ctx.moveTo(x, cy - s / 2); ctx.lineTo(x + dir * s * 0.8, cy); ctx.lineTo(x, cy + s / 2); ctx.closePath(); ctx.fill();
+    };
+    const off = H * 0.42;
+    tri(cx - off + s * 0.8, -1); tri(cx - off + s * 1.5, -1);
+    tri(cx + off - s * 0.8, 1); tri(cx + off - s * 1.5, 1);
+    // 오른쪽 아래 작은 아이콘
+    iconAt(ctx, P, 'note', W - pad - H * 0.1, cy - H * 0.05, H * 0.1, H * 0.1, ink);
+  },
+};
+
+// ---------- 공통 헬퍼 ----------
+const linesOf = L => (L.text || '').split('\n');
+const autoFs = (L, fit) => L.sizeMode === 'manual' ? L.sizePt * PT_MM : fit;
+function maxLineW(L, family, lines, fs) {
+  const f = fontStr(L, family, 100);
+  const ws = (L.widthScale || 100) / 100;
+  return Math.max(0, ...lines.map(l => textW(f, l, fs) * ws));
+}
+function txt(ctx, L, family, s, x, y, fs, align = 'left', maxW = Infinity) {
+  ctx.font = fontStr(L, family, fs);
+  ctx.textBaseline = 'middle';
+  const ws = (L.widthScale || 100) / 100;
+  const w = ctx.measureText(s).width * ws;
+  const k = w > maxW && w > 0 ? ws * maxW / w : ws;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(k, 1);
+  ctx.textAlign = align;
+  ctx.fillText(s, 0, 0);
+  ctx.restore();
+}
+function alignedX(L, x, w) {
+  return L.align === 'left' ? [x, 'left'] : L.align === 'right' ? [x + w, 'right'] : [x + w / 2, 'center'];
+}
+function cloudPath(ctx, x, y, w, h, bump) {
+  const nx = Math.max(2, Math.round(w / bump)), ny = Math.max(1, Math.round(h / bump));
+  const dx = w / nx, dy = h / ny;
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  for (let i = 0; i < nx; i++) ctx.arc(x + (i + 0.5) * dx, y, dx / 2, Math.PI, Math.PI * 2);
+  for (let j = 0; j < ny; j++) ctx.arc(x + w, y + (j + 0.5) * dy, dy / 2, -Math.PI / 2, Math.PI / 2);
+  for (let i = 0; i < nx; i++) ctx.arc(x + w - (i + 0.5) * dx, y + h, dx / 2, 0, Math.PI);
+  for (let j = 0; j < ny; j++) ctx.arc(x, y + h - (j + 0.5) * dy, dy / 2, Math.PI / 2, Math.PI * 1.5);
+  ctx.closePath();
+}
+function circle(ctx, x, y, r) { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); }
+
+/**
+ * 말풍선 하나 그리기 (메신저/말풍선/캐릭터 말풍선 공통)
+ *  st:   round(메신저형 심플) | corner(한쪽 모서리 뾰족) | cloud(구름)
+ *  side: left(꼬리가 왼쪽) | right(좌우 반전)
+ *  tail: corner(아래 모서리 뿔) | center(아래 가운데) | edge(옆면 가운데) | none
+ */
+function drawBubble(ctx, st, x, y, w, h, { side = 'left', tail = 'corner', tl, fill = '#ffffff', ink, lw, outline = true, radius }) {
+  ctx.save();
+  if (side === 'right') { ctx.translate(2 * x + w, 0); ctx.scale(-1, 1); }
+  const paint = () => {
+    ctx.fillStyle = fill; ctx.fill();
+    if (outline) { ctx.strokeStyle = ink; ctx.lineWidth = lw; ctx.lineJoin = 'round'; ctx.stroke(); }
+  };
+  if (st === 'cloud') {
+    cloudPath(ctx, x, y, w, h, Math.max(h / 3, tl * 1.4));
+    paint();
+    const b = h / 6; // 구름 볼록한 정도
+    if (tail === 'edge') {
+      circle(ctx, x - b - tl * 0.3, y + h * 0.62, tl * 0.26); paint();
+      circle(ctx, x - b - tl * 0.85, y + h * 0.72, tl * 0.15); paint();
+    } else if (tail !== 'none') {
+      const cx0 = tail === 'center' ? x + w * 0.45 : x + Math.min(w * 0.14, h * 0.5);
+      circle(ctx, cx0, y + h + b + tl * 0.35, tl * 0.28); paint();
+      circle(ctx, cx0 - tl * 0.5, y + h + b + tl * 0.9, tl * 0.16); paint();
+    }
+  } else {
+    const r = Math.min(radius ?? (st === 'corner' ? h * 0.32 : h * 0.42), w / 2);
+    const cy = y + h / 2;
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y); ctx.arcTo(x + w, y, x + w, y + r, r);
+    ctx.lineTo(x + w, y + h - r); ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+    if (tail === 'center') {
+      const c = x + w / 2;
+      ctx.lineTo(c + tl * 0.55, y + h); ctx.lineTo(c - tl * 0.35, y + h + tl); ctx.lineTo(c - tl * 0.2, y + h);
+    }
+    if (st === 'corner') {
+      ctx.lineTo(x, y + h);
+    } else if (tail === 'corner') {
+      ctx.lineTo(x + r * 0.5, y + h);
+      ctx.lineTo(x - tl * 0.6, y + h);
+      ctx.quadraticCurveTo(x, y + h - tl * 0.15, x, y + h - r * 0.95);
+    } else {
+      ctx.lineTo(x + r, y + h); ctx.arcTo(x, y + h, x, y + h - r, r);
+    }
+    if (tail === 'edge') {
+      ctx.lineTo(x, cy + tl * 0.4); ctx.lineTo(x - tl, cy + tl * 0.15); ctx.lineTo(x, cy - tl * 0.25);
+    }
+    ctx.lineTo(x, y + r); ctx.arcTo(x, y, x + r, y, r);
+    ctx.closePath();
+    paint();
+  }
+  ctx.restore();
+}
+
+// ---------- 메신저 ----------
+const MESSENGER = {
+  layout(L, family) {
+    const fs = L.sizeMode === 'manual' ? L.sizePt * PT_MM : L.tapeMm * 0.26;
+    const st = L.bubble?.style || 'round';
+    const lines = (L.text || '').split('\n').filter(l => l.trim().length);
+    const f100 = fontStr(L, family, 100);
+    const bpx = fs * 0.6, bpy = fs * 0.36, tail = fs * 0.4, padM = fs * 0.55;
+    const gap = fs * (st === 'cloud' ? 0.85 : 0.35);
+    const bh = fs + 2 * bpy;
+    const widths = lines.map(l => textW(f100, l, fs) * (L.widthScale || 100) / 100 + 2 * bpx);
+    const maxB = Math.max(fs * 2, ...widths);
+    const n = Math.max(1, lines.length);
+    const extra = st === 'cloud' ? bh / 6 : 0;
+    const contentH = n * bh + (n - 1) * gap + 2 * extra;
+    const W = L.lengthMode === 'fixed' ? L.lengthMm : Math.max(L.tapeMm * 2, 2 * padM + 2 * tail + maxB + fs * 2.2);
+    const H = Math.max(L.tapeMm, contentH + 2 * padM + (st === 'cloud' ? tail : 0));
+    return { special: 'messenger', wMm: W, hMm: H, fs, st, lines, widths, bpx, bpy, tail, gap, padM, bh, contentH, extra };
+  },
+  draw(ctx, L, family, Y, P) {
+    const { wMm: W, hMm: H, fs, st, lines, widths, bpx, tail, gap, padM, bh, contentH, extra } = Y;
+    const ink = L.inkColor;
+    const startRight = L.messenger?.start === 'right';
+    const lw = Math.max(1 / P, fs * 0.07);
+    let y = (H - contentH) / 2 + extra;
+    lines.forEach((line, i) => {
+      const right = (i % 2 === 1) !== startRight;
+      const bw = Math.min(widths[i], W - 2 * padM - 2 * tail);
+      const x = right ? W - padM - tail - bw - extra : padM + tail + extra;
+      drawBubble(ctx, st, x, y, bw, bh, {
+        side: right ? 'right' : 'left', tail: st === 'corner' ? 'none' : 'corner', tl: tail,
+        fill: right ? ink : '#ffffff', ink, lw, outline: !right,
+      });
+      ctx.fillStyle = right ? L.tapeColor : ink;
+      txt(ctx, L, family, line, x + bpx, y + bh / 2, fs, 'left', bw - 2 * bpx);
+      y += bh + gap;
+    });
+  },
+};
+
+// ---------- 도그태그 (가로 / 세로) ----------
+const DOGTAG = {
+  layout(L, family) {
+    const vert = L.orientation === 'v';
+    const lines = linesOf(L), n = Math.max(1, lines.length), lead = Math.max(1, L.leading);
+    const T = L.tapeMm, pad = T * 0.12, hole = T * 0.11;
+    if (vert) {
+      const cols = lines.map(l => graphemes(l));
+      const maxC = Math.max(1, ...cols.map(c => c.length));
+      let fs = autoFs(L, (T - 2 * pad - T * 0.1) / (1 + (n - 1) * lead) * 0.75);
+      fs = Math.min(fs, (T - 2 * pad) / (1 + (n - 1) * lead));
+      const textTop = pad + hole + T * 0.24;
+      const charStep = fs * (1.05 + (L.tracking || 0) / 100);
+      const H = L.lengthMode === 'fixed' ? L.lengthMm : Math.max(T * 1.8, textTop + maxC * charStep + pad * 1.8);
+      return { special: 'dogtag', vert, wMm: T, hMm: H, cols, n, fs, lead, pad, hole, textTop, charStep, T };
+    }
+    let fs = autoFs(L, Math.min((T - 2 * pad - T * 0.08) / (n * lead), T * 0.24) * 0.85);
+    if (L.wrapMode !== 'grow') fs = Math.min(fs, (T - 2 * pad) / (n * lead));
+    const H = Math.max(T, n * fs * lead + 2 * pad + T * 0.08);
+    const textX = pad + hole + T * 0.24;
+    const W = L.lengthMode === 'fixed' ? L.lengthMm : Math.max(T * 1.8, textX + maxLineW(L, family, lines, fs) + pad * 1.8);
+    return { special: 'dogtag', vert, wMm: W, hMm: H, lines, n, fs, lead, pad, hole, textX, T };
+  },
+  draw(ctx, L, family, Y, P) {
+    const { wMm: W, hMm: H, n, fs, lead, pad, hole, T } = Y;
+    const ink = L.inkColor, lw = Math.max(1 / P, T * 0.016), d = T * 0.05;
+    // 도그태그 외곽: 위아래 직선 + 양옆이 볼록한 곡선 (세로형은 90° 회전)
+    const tagPath = (x, y, w, h) => {
+      const c = h * 0.2;
+      ctx.beginPath();
+      ctx.moveTo(x + c, y); ctx.lineTo(x + w - c, y);
+      ctx.bezierCurveTo(x + w - c * 0.15, y, x + w, y + h * 0.22, x + w, y + h / 2);
+      ctx.bezierCurveTo(x + w, y + h * 0.78, x + w - c * 0.15, y + h, x + w - c, y + h);
+      ctx.lineTo(x + c, y + h);
+      ctx.bezierCurveTo(x + c * 0.15, y + h, x, y + h * 0.78, x, y + h / 2);
+      ctx.bezierCurveTo(x, y + h * 0.22, x + c * 0.15, y, x + c, y);
+      ctx.closePath();
+    };
+    ctx.save();
+    if (Y.vert) { ctx.translate(W, 0); ctx.rotate(Math.PI / 2); tagPath(d, d, H - 2 * d, W - 2 * d); }
+    else tagPath(d, d, W - 2 * d, H - 2 * d);
+    ctx.restore();
+    ctx.strokeStyle = ink; ctx.lineWidth = lw; ctx.lineJoin = 'round'; ctx.stroke();
+    const hx = Y.vert ? W / 2 : pad + hole / 2 + T * 0.07;
+    const hy = Y.vert ? pad + hole / 2 + T * 0.07 : H / 2;
+    circle(ctx, hx, hy, hole / 2);
+    ctx.lineWidth = lw; ctx.stroke();
+    const emboss = (draw) => {
+      ctx.save(); ctx.globalAlpha = 0.6; ctx.fillStyle = '#ffffff'; draw(fs * 0.06); ctx.restore();
+      ctx.fillStyle = ink; draw(0);
+    };
+    if (Y.vert) {
+      const startX = W / 2 + (n - 1) * fs * lead / 2;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      emboss(o => {
+        ctx.font = fontStr(L, family, fs);
+        Y.cols.forEach((col, i) => col.forEach((ch, k) => ctx.fillText(ch, startX - i * fs * lead + o, Y.textTop + k * Y.charStep + Y.charStep / 2 + o)));
+      });
+      return;
+    }
+    const y0 = (H - n * fs * lead) / 2 + fs * lead / 2, maxW = W - Y.textX - pad;
+    emboss(o => Y.lines.forEach((l, i) => txt(ctx, L, family, l, Y.textX + o, y0 + i * fs * lead + o, fs, 'left', maxW)));
+  },
+};
+
+// ---------- 원고지 (가로 / 세로) ----------
+const WONGOJI = {
+  layout(L) {
+    const vert = L.orientation === 'v';
+    const lines = linesOf(L).map(l => graphemes(l)), n = Math.max(1, lines.length);
+    const cols = Math.max(1, ...lines.map(l => l.length));
+    const T = L.tapeMm, pad = T * 0.07, g = 0.3;
+    let cell = L.wrapMode === 'grow' ? (T - 2 * pad) / (1 + 2 * g) : (T - 2 * pad) / (n + (n + 1) * g);
+    if (L.lengthMode === 'fixed') cell = Math.min(cell, (L.lengthMm - 2 * pad) / (cols + 2 * g));
+    const cross = L.wrapMode === 'grow' ? Math.max(T, 2 * pad + cell * (n + (n + 1) * g)) : T;
+    const flow = L.lengthMode === 'fixed' ? L.lengthMm : 2 * pad + cell * (cols + 2 * g);
+    return { special: 'wongoji', vert, wMm: vert ? cross : flow, hMm: vert ? flow : cross, lines, n, cols, cell, g };
+  },
+  draw(ctx, L, family, Y, P) {
+    const { wMm: W, hMm: H, lines, n, cols, cell, g, vert } = Y;
+    const ink = L.inkColor, lw = Math.max(1 / P, cell * 0.035);
+    // 가로: 줄 = 행, 세로: 줄 = 오른쪽부터 열
+    const along = cols * cell, across = n * cell + (n + 1) * g * cell;
+    const gw = vert ? across : along, gh = vert ? along : across;
+    const x0 = (W - gw) / 2, y0 = (H - gh) / 2;
+    const cellXY = (i, c) => vert
+      ? [x0 + gw - g * cell - (i + 1) * cell - i * g * cell, y0 + c * cell]
+      : [x0 + c * cell, y0 + g * cell + i * cell * (1 + g)];
+    ctx.strokeStyle = ink;
+    ctx.lineWidth = lw * 1.7;
+    if (vert) ctx.strokeRect(x0, y0 - g * cell, gw, gh + 2 * g * cell);
+    else ctx.strokeRect(x0 - g * cell, y0, gw + 2 * g * cell, gh);
+    ctx.save(); ctx.globalAlpha = 0.75; ctx.lineWidth = lw;
+    for (let i = 0; i < n; i++) {
+      const [sx, sy] = cellXY(i, 0);
+      ctx.strokeRect(sx, sy, vert ? cell : along, vert ? along : cell);
+      ctx.beginPath();
+      for (let c = 1; c < cols; c++) {
+        if (vert) { ctx.moveTo(sx, sy + c * cell); ctx.lineTo(sx + cell, sy + c * cell); }
+        else { ctx.moveTo(sx + c * cell, sy); ctx.lineTo(sx + c * cell, sy + cell); }
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+    ctx.fillStyle = ink; ctx.textBaseline = 'middle'; ctx.textAlign = 'center';
+    ctx.font = fontStr(L, family, cell * 0.68);
+    lines.forEach((l, i) => l.forEach((ch, c) => {
+      const [cx, cy] = cellXY(i, c);
+      ctx.fillText(ch, cx + cell / 2, cy + cell * 0.53);
+    }));
+  },
+};
+
+// ---------- 말풍선 (일반) ----------
+const BUBBLE = {
+  layout(L, family) {
+    const lines = linesOf(L), n = Math.max(1, lines.length), lead = Math.max(1, L.leading);
+    const T = L.tapeMm, st = L.bubble?.style || 'round';
+    const tailMode = st === 'corner' ? 'none' : (st === 'round' && L.bubble?.tail === 'center' ? 'center' : 'corner');
+    const tl = T * 0.17;
+    const tailH = tailMode === 'center' || (st === 'cloud' && tailMode !== 'none') ? tl : 0; // 아래로 튀어나오는 꼬리만 여백
+    const pad = T * 0.08, m = st === 'cloud' ? T * 0.07 : 0;
+    const bodyH0 = T - 2 * pad - tailH - 2 * m;
+    let fs = autoFs(L, bodyH0 / (n * lead + 0.8) * 0.9);
+    if (L.wrapMode !== 'grow') fs = Math.min(fs, bodyH0 / (n * lead + 0.8));
+    const bodyH = Math.max(bodyH0, fs * (n * lead + 0.8));
+    const H = bodyH + 2 * pad + tailH + 2 * m;
+    const bx = fs * 0.8;
+    const sideRoom = tailMode === 'corner' && st === 'round' ? tl * 0.6 : 0;
+    const bodyW = L.lengthMode === 'fixed' ? L.lengthMm - 2 * pad - 2 * m - sideRoom : Math.max(maxLineW(L, family, lines, fs) + 2 * bx, bodyH * 1.2);
+    return { special: 'bubble', wMm: bodyW + 2 * pad + 2 * m + sideRoom, hMm: H, lines, n, lead, fs, pad, tl, m, bodyW, bodyH, bx, st, tailMode, sideRoom, T };
+  },
+  draw(ctx, L, family, Y, P) {
+    const { lines, n, lead, fs, pad, tl, m, bodyW, bodyH, bx, st, tailMode, sideRoom, T } = Y;
+    const ink = L.inkColor, lw = Math.max(1 / P, T * 0.014);
+    const x = pad + m + sideRoom, y = pad + m;
+    drawBubble(ctx, st, x, y, bodyW, bodyH, { tail: tailMode, tl, ink, lw });
+    ctx.fillStyle = ink;
+    const y0 = y + (bodyH - n * fs * lead) / 2 + fs * lead / 2;
+    const [tx, al] = alignedX(L, x + bx, bodyW - 2 * bx);
+    lines.forEach((l, i) => txt(ctx, L, family, l, tx, y0 + i * fs * lead, fs, al, bodyW - 2 * bx));
+  },
+};
+
+// ---------- 말풍선 (캐릭터가 말하는) ----------
+const BUBBLE2 = {
+  layout(L, family) {
+    const lines = linesOf(L), n = Math.max(1, lines.length), lead = Math.max(1, L.leading);
+    const T = L.tapeMm, st = L.bubble?.style || 'round';
+    const bleed = !!L.bubble?.bleed;
+    const pad = T * 0.08, m = st === 'cloud' ? T * 0.07 : 0, tail = st === 'corner' ? T * 0.05 : T * 0.14;
+    const icon = L.hero?.icon || 'bear';
+    const { w, h } = iconSize(icon);
+    const box = T * (bleed ? 0.62 : 0.58);
+    const cell = Math.min(box / (w || 1), box / (h || 1));
+    const iconW = (w || 1) * cell, iconH = (h || 1) * cell;
+    const bodyH0 = bleed ? T - 2 * pad : T - 2 * pad - 2 * m - T * 0.1;
+    let fs = autoFs(L, bodyH0 / (n * lead + 0.8) * 0.9);
+    if (L.wrapMode !== 'grow') fs = Math.min(fs, bodyH0 / (n * lead + 0.8));
+    const bodyH = Math.max(bodyH0, fs * (n * lead + 0.8));
+    const H = bleed ? bodyH + 2 * pad : bodyH + 2 * pad + 2 * m + T * 0.1;
+    const bx = fs * 0.8;
+    const near = pad + iconW + T * 0.05 + tail + m; // 캐릭터 쪽 말풍선 가장자리 위치
+    const textW_ = maxLineW(L, family, lines, fs) + 2 * bx;
+    const bodyW = L.lengthMode === 'fixed' ? L.lengthMm - near - m - pad : Math.max(textW_, bodyH * 1.2);
+    const W = bleed ? near + bodyW : near + bodyW + m + pad;
+    return { special: 'bubble2', wMm: W, hMm: H, lines, n, lead, fs, pad, m, tail, icon, iconW, iconH, near, bodyW, bodyH, bx, st, bleed, T };
+  },
+  draw(ctx, L, family, Y, P) {
+    const { wMm: W, hMm: H, lines, n, lead, fs, pad, m, tail, icon, iconW, iconH, near, bodyW, bodyH, bx, st, bleed, T } = Y;
+    const ink = L.inkColor, lw = Math.max(1 / P, T * 0.014);
+    const right = L.bubble?.charSide === 'right';
+    const mx = (x, w) => right ? W - x - w : x; // 캐릭터 오른쪽이면 좌우 반전
+    const iy = bleed ? (H - iconH) / 2 : H - pad - iconH;
+    iconAt(ctx, P, icon, mx(pad, iconW), iy, iconW, iconH, ink);
+    if (bleed) {
+      // 말풍선이 라벨 위·아래·바깥쪽 끝 밖으로 빠져나가 잘린 모양 (캐릭터 쪽 가장자리와 꼬리만 보임)
+      const over = T * 0.35;
+      const drawW = bodyW + T;
+      drawBubble(ctx, st, mx(near, drawW), -over, drawW, H + 2 * over, {
+        side: right ? 'right' : 'left', tail: st === 'corner' ? 'none' : 'edge', tl: tail, ink, lw, radius: (H + 2 * over) * 0.32,
+      });
+    } else {
+      drawBubble(ctx, st, mx(near, bodyW), pad + m, bodyW, bodyH, {
+        side: right ? 'right' : 'left', tail: st === 'corner' ? 'none' : 'corner', tl: tail, ink, lw,
+      });
+    }
+    ctx.fillStyle = ink;
+    const y = bleed ? pad : pad + m;
+    const y0 = y + (bodyH - n * fs * lead) / 2 + fs * lead / 2;
+    const [tx, al] = alignedX(L, mx(near, bodyW) + bx, bodyW - 2 * bx);
+    lines.forEach((l, i) => txt(ctx, L, family, l, tx, y0 + i * fs * lead, fs, al, bodyW - 2 * bx));
+  },
+};
+
+// ---------- 수첩 (위쪽 스프링) ----------
+const NOTEBOOK = {
+  layout(L, family) {
+    const lines = linesOf(L), n = Math.max(1, lines.length), lead = Math.max(1, L.leading);
+    const T = L.tapeMm, pad = T * 0.08, ring = T * 0.16;
+    const areaH0 = T - pad - ring - pad * 1.2;
+    let fs = autoFs(L, areaH0 / (n * lead) * 0.78);
+    if (L.wrapMode !== 'grow') fs = Math.min(fs, areaH0 / (n * lead));
+    const areaH = Math.max(areaH0, n * fs * lead / 0.9);
+    const H = areaH + pad + ring + pad * 1.2;
+    const bx = Math.max(fs * 0.9, T * 0.12);
+    const W = L.lengthMode === 'fixed' ? L.lengthMm : Math.max(T * 1.6, 2 * pad + 2 * bx + maxLineW(L, family, lines, fs));
+    return { special: 'notebook', wMm: W, hMm: H, lines, n, lead, fs, pad, ring, areaH, bx, T };
+  },
+  draw(ctx, L, family, Y, P) {
+    const { wMm: W, hMm: H, lines, n, lead, fs, pad, ring, bx, T } = Y;
+    const ink = L.inkColor, lw = Math.max(1 / P, T * 0.016);
+    const top = pad;
+    ctx.strokeStyle = ink; ctx.lineWidth = lw;
+    ctx.strokeRect(pad, top, W - 2 * pad, H - pad - top);
+    // 스프링 구멍 + 고리
+    const step = T * 0.16;
+    const count = Math.max(2, Math.floor((W - 2 * pad - step * 0.6) / step));
+    const span = (count - 1) * step;
+    ctx.fillStyle = ink;
+    for (let i = 0; i < count; i++) {
+      const rx = W / 2 - span / 2 + i * step;
+      circle(ctx, rx, top + T * 0.1, T * 0.034); ctx.fill();
+      ctx.fillRect(rx - lw / 2, top, lw, T * 0.1);
+    }
+    const areaTop = top + T * 0.16, areaBot = H - pad;
+    const y0 = areaTop + (areaBot - areaTop - n * fs * lead) / 2 + fs * lead / 2;
+    const [tx, al] = alignedX(L, pad + bx, W - 2 * pad - 2 * bx);
+    lines.forEach((l, i) => txt(ctx, L, family, l, tx, y0 + i * fs * lead, fs, al, W - 2 * pad - 2 * bx));
+  },
+};
+
+// ---------- 오마모리 (세로) ----------
+const OMAMORI = {
+  layout(L, family) {
+    if (L.omamori?.style === 'charm') return OMAMORI2.layout(L, family);
+    const cols = linesOf(L).map(l => graphemes(l)), n = Math.max(1, cols.length);
+    const maxC = Math.max(1, ...cols.map(c => c.length));
+    const T = L.tapeMm, pad = T * 0.1, knot = T * 0.42, inset = T * 0.1;
+    const innerW = T - 2 * pad - 2 * inset;
+    const lead = Math.max(1, L.leading);
+    let fs = autoFs(L, innerW / (1 + (n - 1) * lead) * 0.78);
+    fs = Math.min(fs, innerW * 0.8 / (1 + (n - 1) * lead));
+    const colStep = fs * lead;
+    const charStep = fs * (1.06 + (L.tracking || 0) / 100);
+    const charm = T * 0.3;
+    const bodyTop = pad + knot;
+    const textH = maxC * charStep;
+    const H = L.lengthMode === 'fixed' ? L.lengthMm : bodyTop + inset + T * 0.14 + textH + T * 0.12 + charm + inset + pad;
+    return { special: 'omamori', wMm: T, hMm: H, cols, n, fs, colStep, charStep, pad, knot, inset, charm, bodyTop, textH, T };
+  },
+  draw(ctx, L, family, Y, P) {
+    if (Y.style2) return OMAMORI2.draw(ctx, L, family, Y, P);
+    const { wMm: W, hMm: H, cols, n, fs, colStep, charStep, pad, knot, inset, charm, bodyTop, textH, T } = Y;
+    const ink = L.inkColor;
+    const { x, y, h, cx } = omamoriShell(ctx, W, H, pad, knot, bodyTop, T, ink, P);
+    // 세로 글자 (오른쪽 줄부터)
+    const top = y + inset + T * 0.14;
+    const avail = h - inset * 2 - T * 0.26 - charm;
+    const off = Math.max(0, (avail - textH) / 2);
+    const startX = cx + (n - 1) * colStep / 2;
+    ctx.fillStyle = ink; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = fontStr(L, family, fs);
+    cols.forEach((col, i) => {
+      const colX = startX - i * colStep;
+      col.forEach((ch, k) => ctx.fillText(ch, colX, top + off + k * charStep + charStep / 2));
+    });
+    // 아래 부적 장식
+    const icon = L.hero?.icon || 'clover';
+    iconAt(ctx, P, icon, cx - charm / 2, y + h - inset - T * 0.06 - charm, charm, charm, ink);
+  },
+};
+
+// 오마모리 공통: 주머니 + 매듭
+function omamoriShell(ctx, W, H, pad, knot, bodyTop, T, ink, P) {
+  const lw = Math.max(1 / P, T * 0.016);
+  const x = pad, y = bodyTop, w = W - 2 * pad, h = H - pad - bodyTop, c = w * 0.22;
+  const pouch = d => {
+    ctx.beginPath();
+    ctx.moveTo(x + d + c, y + d); ctx.lineTo(x + w - d - c, y + d); ctx.lineTo(x + w - d, y + d + c);
+    ctx.lineTo(x + w - d, y + h - d); ctx.lineTo(x + d, y + h - d); ctx.lineTo(x + d, y + d + c); ctx.closePath();
+  };
+  ctx.strokeStyle = ink; ctx.lineJoin = 'round';
+  pouch(0); ctx.lineWidth = lw * 1.4; ctx.stroke();
+  pouch(T * 0.06); ctx.lineWidth = lw; ctx.stroke();
+  const cx = W / 2, ky = pad + knot * 0.42;
+  ctx.lineWidth = lw * 1.2;
+  ctx.beginPath(); ctx.ellipse(cx - T * 0.11, ky, T * 0.1, T * 0.06, -0.3, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.ellipse(cx + T * 0.11, ky, T * 0.1, T * 0.06, 0.3, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(cx - T * 0.02, ky); ctx.lineTo(cx - T * 0.06, y + T * 0.02);
+  ctx.moveTo(cx + T * 0.02, ky); ctx.lineTo(cx + T * 0.06, y + T * 0.02);
+  ctx.stroke();
+  circle(ctx, cx, ky, T * 0.045); ctx.fillStyle = ink; ctx.fill();
+  return { x, y, w, h, cx };
+}
+
+// 오마모리 2: 가운데 큰 그림 + 아래 가로 글씨
+const OMAMORI2 = {
+  layout(L, family) {
+    const lines = linesOf(L).filter((l, i, a) => l.length || a.length === 1), n = Math.max(1, lines.length);
+    const T = L.tapeMm, pad = T * 0.1, knot = T * 0.42, inset = T * 0.12;
+    const innerW = T - 2 * pad - 2 * inset;
+    const lead = Math.max(1, L.leading);
+    const hasText = lines.some(l => l.trim());
+    const icon = L.hero?.icon || 'clover';
+    const { w, h } = iconSize(icon);
+    const imgW = innerW * 0.9, imgH = (w && h) ? Math.min(imgW * h / w, innerW * 1.3) : imgW;
+    let fs = autoFs(L, innerW * 0.26);
+    const tw = maxLineW(L, family, lines, fs);
+    if (tw > innerW) fs *= innerW / tw;
+    const textH = hasText ? n * fs * lead : 0;
+    const bodyTop = pad + knot;
+    const gap = hasText ? T * 0.1 : 0;
+    const H = L.lengthMode === 'fixed' ? L.lengthMm : bodyTop + inset + T * 0.16 + imgH + gap + textH + inset + T * 0.06 + pad;
+    return { special: 'omamori', style2: true, wMm: T, hMm: H, lines, n, fs, lead, pad, knot, inset, bodyTop, icon, imgW, imgH, gap, textH, hasText, innerW, T };
+  },
+  draw(ctx, L, family, Y, P) {
+    const { wMm: W, hMm: H, lines, n, fs, lead, pad, knot, inset, bodyTop, icon, imgW, imgH, gap, textH, hasText, innerW, T } = Y;
+    const ink = L.inkColor;
+    const { y, h, cx } = omamoriShell(ctx, W, H, pad, knot, bodyTop, T, ink, P);
+    const top = y + inset + T * 0.16;
+    const avail = h - inset * 2 - T * 0.22;
+    const off = Math.max(0, (avail - (imgH + gap + textH)) / 2);
+    iconAt(ctx, P, icon, cx - imgW / 2, top + off, imgW, imgH, ink);
+    if (!hasText) return;
+    ctx.fillStyle = ink;
+    const ty = top + off + imgH + gap + fs * lead / 2;
+    lines.forEach((l, i) => txt(ctx, L, family, l, cx, ty + i * fs * lead, fs, 'center', innerW));
+  },
+};
+
+const SPECIAL = { music: MUSIC, messenger: MESSENGER, dogtag: DOGTAG, wongoji: WONGOJI, bubble: BUBBLE, bubble2: BUBBLE2, omamori: OMAMORI, notebook: NOTEBOOK };
+export const isSpecialFrame = f => !!SPECIAL[f];

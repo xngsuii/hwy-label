@@ -54,3 +54,13 @@ export function iconSvg(name, scale = 2, color = 'currentColor') {
   g.forEach((row, y) => [...row].forEach((ch, x) => { if (ch === 'X') r += `<rect x="${x}" y="${y}" width="1" height="1"/>`; }));
   return `<svg width="${w * scale}" height="${h * scale}" viewBox="0 0 ${w} ${h}" fill="${color}" shape-rendering="crispEdges">${r}</svg>`;
 }
+
+// ---- 사용자 이미지 아이콘 (이미지 → 비트맵) ----
+let customKeys = [];
+let customRef = null;
+export function setCustomIcons(list = []) {
+  if (list === customRef) return;
+  customRef = list;
+  customKeys.forEach(k => delete ICONS[k]);
+  customKeys = list.map(ic => { ICONS[ic.id] = ic.rows; return ic.id; });
+}
