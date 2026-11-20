@@ -91,6 +91,7 @@ export function defaultState() {
     board: { size: '1080x1080', landscape: false, w: 1080, h: 1080, bg: 'mat', bgColor: '#ffffff', bgImage: null, scale: 0.6, items: [], layout: 'auto' },
     palette: [...DEFAULT_PALETTE],
     palettePresetId: 'custom',
+    customPalette: [...DEFAULT_PALETTE], // '커스텀' 팔레트 색 (프리셋과 따로 저장)
     palettePresets: [],       // {id,name,colors}
     typePresets: [],          // {id,name,fontId,sizeMode,sizePt,tracking,leading,widthScale}
     kaomojiFav: [],
@@ -124,6 +125,7 @@ export const store = {
         ...d, ...saved,
         label: { ...d.label, ...saved.label, deco: { ...d.label.deco, ...(saved.label?.deco || {}) }, hero: { ...d.label.hero, ...(saved.label?.hero || {}) },
           music: { ...d.label.music, ...(saved.label?.music || {}) }, messenger: { ...d.label.messenger, ...(saved.label?.messenger || {}) }, bubble: { ...d.label.bubble, ...(saved.label?.bubble || {}) }, omamori: { ...d.label.omamori, ...(saved.label?.omamori || {}) } },
+        customPalette: saved.customPalette || (saved.palettePresetId === 'custom' || !saved.palettePresetId ? saved.palette || d.palette : d.palette),
         board: { ...d.board, ...saved.board },
         ui: { ...d.ui, ...saved.ui },
       };

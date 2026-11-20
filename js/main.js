@@ -982,13 +982,15 @@ function PaletteSec({ s }) {
     // 현재 라벨이 이 색을 쓰고 있으면 함께 변경
     const L = st.label;
     const label = { ...L, tapeColor: L.tapeColor === old ? c : L.tapeColor, inkColor: L.inkColor === old ? c : L.inkColor, invColor: L.invColor === old ? c : L.invColor };
-    return { ...st, palette, label, palettePresetId: 'custom' };
+    // 지금 보고 있는 프리셋(또는 커스텀)에 바로 저장
+    if (st.palettePresetId === 'custom') return { ...st, palette, label, customPalette: palette };
+    return { ...st, palette, label, palettePresets: st.palettePresets.map(p => p.id === st.palettePresetId ? { ...p, colors: palette } : p) };
   });
-  const choose = id => {
-    if (id === 'custom') { store.set(st => ({ ...st, palettePresetId: 'custom' })); return; }
-    const p = s.palettePresets.find(x => x.id === id);
-    if (p) store.set(st => ({ ...st, palette: [...p.colors], palettePresetId: id }));
-  };
+  const choose = id => store.set(st => {
+    if (id === 'custom') return { ...st, palette: [...(st.customPalette || st.palette)], palettePresetId: 'custom' };
+    const p = st.palettePresets.find(x => x.id === id);
+    return p ? { ...st, palette: [...p.colors], palettePresetId: id } : st;
+  });
   const register = async () => {
     const name = await askText('컬러 프리셋 이름을 정해주세요', `팔레트 ${s.palettePresets.length + 1}`, { title: '컬러 프리셋' });
     if (!name) return;
@@ -999,7 +1001,7 @@ function PaletteSec({ s }) {
   const remove = async () => {
     if (s.palettePresetId === 'custom') return;
     if (!(await askConfirm('paletteDelete', '이 컬러 프리셋을 지울까요?', { title: '프리셋 삭제', ok: '지우기' }))) return;
-    store.set(st => ({ ...st, palettePresets: st.palettePresets.filter(p => p.id !== st.palettePresetId), palettePresetId: 'custom' }));
+    store.set(st => ({ ...st, palettePresets: st.palettePresets.filter(p => p.id !== st.palettePresetId), palettePresetId: 'custom', palette: [...(st.customPalette || st.palette)] }));
   };
   const L = s.label;
   const target = s.ui.colorTarget || 'tapeColor';
