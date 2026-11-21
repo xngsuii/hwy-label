@@ -53,8 +53,24 @@ function frameSpace(frame) {
 }
 
 // ---------- 레이아웃 ----------
+// 특수 프레임 크기 규격: 실제 라벨 프린터처럼 한 변은 테이프 폭.
+// 가로형은 높이 = 테이프 폭이 되도록 통째로 확대·축소 (세로형은 이미 가로 = 테이프 폭).
+// '높이 늘림' 모드면 줄이 많을 때 높이가 커지는 것을 허용
+function fitSpecial(L, family) {
+  const S = SPECIAL[L.frame], T = L.tapeMm;
+  let Y = S.layout(L, family);
+  const plain = { ...Y, k: 1, w0: Y.wMm, h0: Y.hMm };
+  if (Math.abs(Y.wMm - T) < 0.01 || Math.abs(Y.hMm - T) < 0.01) return plain;
+  if (Y.hMm > T && L.wrapMode === 'grow') return plain;
+  let k = T / Y.hMm;
+  if (L.lengthMode === 'fixed') { // 고정 길이는 줄인 뒤에도 그 길이가 되도록 다시 계산
+    Y = S.layout({ ...L, lengthMm: L.lengthMm / k }, family);
+    k = T / Y.hMm;
+  }
+  return { ...Y, k, w0: Y.wMm, h0: Y.hMm, wMm: Y.wMm * k, hMm: T };
+}
 export function layoutLabel(L, family) {
-  if (SPECIAL[L.frame]) return SPECIAL[L.frame].layout(L, family);
+  if (SPECIAL[L.frame]) return fitSpecial(L, family);
   const vert = L.orientation === 'v';
   const lines = richLines(L, L.text || ' ');
   const n = Math.max(1, lines.length);
@@ -181,8 +197,9 @@ export function renderLabel(L, family, pxPerMm = 10) {
     ctx.fillRect(0, 0, W, H);
     drawPattern(ctx, L.pattern, W, H, P, ink, false);
     ctx.save();
-    ctx.scale(P, P); // 이후 mm 좌표로 그림
-    SPECIAL[L.frame].draw(ctx, L, family, Y, P);
+    const k = Y.k || 1; // 테이프 폭 맞춤 배율
+    ctx.scale(P * k, P * k); // 이후 mm 좌표로 그림
+    SPECIAL[L.frame].draw(ctx, L, family, { ...Y, wMm: Y.w0 ?? Y.wMm, hMm: Y.h0 ?? Y.hMm }, P * k);
     ctx.restore();
     return { canvas: cv, wMm: Y.wMm, hMm: Y.hMm, layout: Y };
   }

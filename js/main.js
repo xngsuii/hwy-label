@@ -116,10 +116,23 @@ const Sec = ({ title, sub, children, cls = '' }) => html`
     <div class="body">${children}</div>
   </div>`;
 
-const Range = ({ label, min, max, step = 1, value, onInput, fmt = v => v }) => html`
+// 슬라이더 + 숫자 (숫자를 누르면 직접 입력)
+function Range({ label, min, max, step = 1, value, onInput, fmt = v => v }) {
+  const [edit, setEdit] = useState(false);
+  const pct = max <= 2 && String(fmt(max)).includes('%'); // 0.62 → 62% 처럼 보이는 값은 % 숫자로 입력
+  const commit = e => {
+    const v = parseFloat(e.target.value) / (pct ? 100 : 1);
+    if (!isNaN(v)) onInput(Math.min(max, Math.max(min, v)));
+    setEdit(false);
+  };
+  return html`
   <div class="row"><span class="lbl">${label}</span>
     <input type="range" min=${min} max=${max} step=${step} value=${value} onInput=${e => onInput(+e.target.value)} />
-    <span class="val">${fmt(value)}</span></div>`;
+    ${edit
+      ? html`<input class="num val-in" type="number" value=${pct ? Math.round(value * 100) : value} ref=${el => el && !el.dataset.f && (el.dataset.f = 1, el.focus(), el.select())}
+          onBlur=${commit} onKeyDown=${e => { if (e.key === 'Enter') e.target.blur(); else if (e.key === 'Escape') setEdit(false); }} />`
+      : html`<span class="val edit" title="눌러서 숫자 입력" onClick=${() => setEdit(true)}>${fmt(value)}</span>`}</div>`;
+}
 
 const Toggle = ({ options, value, onChange }) => html`
   <span class="toggle">${options.map(([v, t]) => html`<button class=${value === v ? 'on' : ''} onClick=${() => onChange(v)}>${t}</button>`)}</span>`;
@@ -275,18 +288,17 @@ function TextSec({ s, taRef }) {
         <textarea class="main" wrap="off" ref=${taRef} value=${L.text} style=${'height:' + taH + 'px'}
           onInput=${e => setLabel(l => editText(l, e.target.value))} onScroll=${e => setScroll(e.target.scrollTop)} placeholder="라벨에 넣을 글자"></textarea>
       </div>
-      <div class="row" style="margin-top:8px">
-        <select class="pill" value=${L.fontId} onChange=${e => setLabel({ fontId: e.target.value })}>
-          ${Object.entries(groups).map(([g, fs]) => html`<optgroup label=${g}>${fs.map(f => html`<option value=${f.id}>${f.name}</option>`)}</optgroup>`)}
-          ${custom.length ? html`<optgroup label="내 폰트">${custom.map(f => html`<option value=${f.id}>${f.name}</option>`)}</optgroup>` : null}
-        </select>
-        ${custom.some(f => f.id === L.fontId) ? html`<button class="btn" onClick=${removeFont} title="내 폰트 삭제">✕</button>` : null}
-      </div>
-      <div class="row">
+      <div class="row" style="margin-top:10px">
         <span class="lbl">크기</span>
         <${Toggle} value=${L.sizeMode} onChange=${v => setLabel({ sizeMode: v })} options=${[['auto', '자동 맞춤'], ['manual', '직접']]} />
         ${L.sizeMode === 'manual' ? html`<input class="num" type="number" min="3" max="200" step="0.5" value=${L.sizePt} onInput=${e => setLabel({ sizePt: +e.target.value || 14 })} /><span style="font-size:10px">pt</span>` : null}
       </div>
+      ${multi ? html`
+        <div class="row">
+          <span class="lbl">줄 크기</span>
+          <span class="ln-cur">${CIRC[cur] || `(${cur + 1})`}</span>
+          <${Toggle} value=${L.lineSizes?.[cur] || 'l'} onChange=${v => setSize(cur, v)} options=${LINE_SIZES} />
+        </div>` : null}
       <div class="row">
         <span class="lbl">스타일</span>
         ${B('bold', '굵게')}${B('italic', '기울임')}${B('underline', '밑줄')}${B('strike', '취소선')}${B('outline', '외곽선')}${B('hl', '텍스트 배경색')}${B('pt', '포인트색 글자')}
@@ -295,12 +307,13 @@ function TextSec({ s, taRef }) {
         <span class="lbl">정렬</span>
         ${A('left', '왼쪽 정렬')}${A('center', '가운데 정렬')}${A('right', '오른쪽 정렬')}${A('justify', '양쪽 정렬')}
       </div>
-      ${multi ? html`
-        <div class="row">
-          <span class="lbl">줄 크기</span>
-          <span class="ln-cur">${CIRC[cur] || `(${cur + 1})`}</span>
-          <${Toggle} value=${L.lineSizes?.[cur] || 'l'} onChange=${v => setSize(cur, v)} options=${LINE_SIZES} />
-        </div>` : null}
+      <div class="row" style="margin-top:10px">
+        <select class="pill fontsel" value=${L.fontId} style=${'font-family:' + ffam(fontById(L.fontId, custom))} onPointerDown=${loadAllFonts} onFocus=${loadAllFonts} onChange=${e => setLabel({ fontId: e.target.value })}>
+          ${Object.entries(groups).map(([g, fs]) => html`<optgroup label=${g}>${fs.map(f => html`<option value=${f.id} style=${'font-family:' + ffam(f)}>${f.name}</option>`)}</optgroup>`)}
+          ${custom.length ? html`<optgroup label="내 폰트">${custom.map(f => html`<option value=${f.id} style=${'font-family:' + ffam(f)}>${f.name}</option>`)}</optgroup>` : null}
+        </select>
+        ${custom.some(f => f.id === L.fontId) ? html`<button class="btn" onClick=${removeFont} title="내 폰트 삭제">✕</button>` : null}
+      </div>
       <div class="sub-h">내 폰트 추가</div>
       <div class="row">
         <button class="btn" onClick=${() => fileRef.current.click()}>📁 폰트 파일 (.ttf/.otf/.woff)</button>
@@ -311,6 +324,9 @@ function TextSec({ s, taRef }) {
     <//>`;
 }
 
+// 폰트 목록에서 이름을 그 폰트로 보여주기
+const ffam = f => `'${f.family}', var(--ui)`;
+const loadAllFonts = () => BUILTIN_FONTS.forEach(f => ensureFont(f));
 function SizeSec({ s }) {
   const L = s.label;
   // 가로↔세로 전환 시 장식 위치도 함께 회전 (좌우 양 끝 ↔ 위아래 양 끝)
@@ -386,11 +402,11 @@ function TypeSec({ s }) {
 const FRAMES = [['none', '없음', ''], ['solid', '실선', 'border:1px solid'], ['dotted', '점선', 'border:1px dotted'], ['double', '이중', 'border:3px double']];
 // 순서: 자유롭게 변형되는 것(가로/세로·길이) → 형식이 정해진 것
 const SPECIAL = [['dogtag', '◉▭', '군번줄'], ['wongoji', '▦', '원고지'], ['notebook', '⁘▭', '수첩'], ['lace', '⌒⌒', '레이스'], ['lace2', '⟋⟋', '사선 레이스'],
-  ['messenger', '💬', '메신저'], ['bubble', '◖ ◗', '말풍선'], ['bubble2', '☺◖', '말풍선|(캐릭터)'], ['burst', '✸', '강조 말풍선'],
+  ['messenger', '💬', '메신저'], ['bubble', '◖ ◗', '말풍선'], ['bubble2', '☺◖', '말풍선|(캐릭터)'], ['torn', '⋚▭⋛', '찢은 테이프'], ['burst', '✸', '강조 말풍선'],
   ['music', '▶❚❚', '뮤직'], ['music2', '♫ ━', '뮤직|(가사)'], ['omamori', '⛩', '오마모리'], ['virus', '▣↗', '믿어주세요...'],
   ['search', '( ⌕)', '검색창'], ['chalk', '▬▭', '칠판'], ['sms', '▯✉', '문자'], ['dialog', '▭☒', '확인창'],
-  ['memo', '✿┆', '메모'], ['torn', '⋚▭⋛', '찢은 테이프'],
-  ['wanted', '$▣', '수배지'], ['sparkle', '—✦', '반짝 라인'], ['tv', '▣▔', 'TV']];
+  ['memo', '✿┆', '메모'],
+  ['wanted', '$▣', '수배지'], ['sparkle', '—✦', '반짝 라인'], ['tv', '📺︎', 'TV']];
 const SPECIAL_PER_PAGE = 8;
 const VIRUS_TEXT = { ko: '절대\n바이러스\n아닙니다.\n믿어\n주세요... 전\n돌고래입니\n다', en: 'Totally not a\nvirus.Trust\nme...im a\ndolphin' };
 const SPECIAL_DEFAULT_TEXT = {
@@ -791,6 +807,25 @@ function Left({ s, fv }) {
 }
 
 // ---------------- CENTER ----------------
+// 판 배치 되돌리기 기록 (메모리에만, 최대 50단계)
+const boardHist = [];
+function pushBoardHist() {
+  const b = store.get().board;
+  boardHist.push({ items: b.items, layout: b.layout });
+  if (boardHist.length > 50) boardHist.shift();
+}
+// 드래그했는데 아무것도 안 바뀌었으면 방금 쌓은 기록 취소
+function dropBoardHistIfSame() {
+  const last = boardHist[boardHist.length - 1];
+  if (last && last.items === store.get().board.items) boardHist.pop();
+}
+const ARROWS = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+let nudgeAt = 0;
+function undoBoard() {
+  const last = boardHist.pop();
+  if (!last) return;
+  store.set(st => ({ ...st, board: { ...st.board, items: last.items, layout: last.layout } }));
+}
 function Center({ s, fv }) {
   const wrapRef = useRef();
   const [fit, setFit] = useState(0.5);
@@ -809,13 +844,28 @@ function Center({ s, fv }) {
   const sel = s.ui.boardSel;
   const picked = new Set(s.selected);
   const clearSel = () => store.set(st => ({ ...st, selected: [], ui: { ...st.ui, boardSel: null } }));
-  // Delete 키: 판/서랍에서 선택한 라벨 지우기 (글자 입력 중엔 무시)
+  // Delete 키: 판/서랍에서 선택한 라벨 지우기 / Ctrl+Z: 배치 되돌리기 (글자 입력 중엔 무시)
   useEffect(() => {
     const onKey = e => {
-      if (e.key !== 'Delete') return;
+      const undoKey = (e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'z' || e.key === 'Z');
+      const arrow = ARROWS[e.key];
+      if (e.key !== 'Delete' && !undoKey && !arrow) return;
       const t = e.target;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
       if (document.querySelector('.dlg-back')) return;
+      if (undoKey) { e.preventDefault(); undoBoard(); return; }
+      if (arrow) { // 방향키: 선택한 라벨 1px씩 (Shift: 10px)
+        const st = store.get();
+        const ids = new Set(st.selected.length ? st.selected : st.ui.boardSel ? [st.ui.boardSel] : []);
+        if (!ids.size || !st.board.items.some(x => ids.has(x.id))) return;
+        e.preventDefault();
+        const k = e.shiftKey ? 10 : 1;
+        // 연달아 누르는 동안은 되돌리기 한 번으로 묶음
+        if (Date.now() - nudgeAt > 600) pushBoardHist();
+        nudgeAt = Date.now();
+        store.set(st2 => ({ ...st2, board: { ...st2.board, layout: 'free', items: st2.board.items.map(x => ids.has(x.id) ? { ...x, x: x.x + arrow[0] * k, y: x.y + arrow[1] * k } : x) } }));
+        return;
+      }
       const st = store.get();
       const ids = st.selected.length ? st.selected : st.ui.boardSel ? [st.ui.boardSel] : [];
       if (ids.length) { e.preventDefault(); removeLabels(ids); }
@@ -825,6 +875,7 @@ function Center({ s, fv }) {
   }, []);
 
   const relayout = mode => {
+    pushBoardHist();
     store.set(st => {
       const b = { ...st.board, layout: mode === 'auto' ? 'auto' : 'free' };
       b.items = mode === 'auto' ? autoLayout(st.drawer, st.customFonts, b) : scatterLayout(st.drawer, st.customFonts, b);
@@ -833,6 +884,7 @@ function Center({ s, fv }) {
   };
   const modItem = (fn) => {
     if (!sel) { toast('판에서 라벨을 먼저 클릭해 선택하세요'); return; }
+    pushBoardHist();
     store.set(st => {
       let items = st.board.items.slice();
       const i = items.findIndex(x => x.id === sel);
@@ -846,10 +898,20 @@ function Center({ s, fv }) {
   const back = () => modItem((items, i) => { const [x] = items.splice(i, 1); items.unshift(x); return items; });
 
   const drag = useRef(null);
+  const [guides, setGuides] = useState(null); // 스마트 가이드 선 { x: [...], y: [...] } (판 좌표)
+  const snapOn = s.ui.snap !== false;
+  // 회전까지 반영한 겉 상자 (판 좌표)
+  const aabb = (it, im) => {
+    const w = im.w * (it.s || 1), h = im.h * (it.s || 1), a = (it.rot || 0) * Math.PI / 180;
+    const bw = Math.abs(w * Math.cos(a)) + Math.abs(h * Math.sin(a)), bh = Math.abs(w * Math.sin(a)) + Math.abs(h * Math.cos(a));
+    const cx = it.x + w / 2, cy = it.y + h / 2;
+    return { l: cx - bw / 2, r: cx + bw / 2, t: cy - bh / 2, b: cy + bh / 2, cx, cy };
+  };
   const dims = it => { const L = byId[it.id]; const im = L ? labelImage(L, s.customFonts, ppm) : { w: 0, h: 0 }; return im; };
   const startDrag = (e, it, mode) => {
     e.preventDefault();
     e.stopPropagation();
+    pushBoardHist(); // 움직이지 않고 끝나면 onUp 에서 취소
     // 판에서 고른 라벨 = 서랍에서 선택한 라벨 (shift/ctrl: 여러 개)
     const multi = e.shiftKey || e.ctrlKey || e.metaKey;
     store.set(st => {
@@ -863,6 +925,18 @@ function Center({ s, fv }) {
     const im = dims(it);
     drag.current = { mode, id: it.id, sx: e.clientX, sy: e.clientY, x: it.x, y: it.y, s: it.s || 1, rot: it.rot || 0, cx, cy, w: im.w, h: im.h,
       d0: Math.hypot(e.clientX - cx, e.clientY - cy) || 1, a0: Math.atan2(e.clientY - cy, e.clientX - cx) };
+    if (mode === 'move') {
+      // 맞출 기준선: 판 가장자리·가운데 + 다른 라벨들의 가장자리·가운데
+      const tx = [0, board.w / 2, board.w], ty = [0, board.h / 2, board.h], boxes = [];
+      board.items.forEach(o => {
+        if (o.id === it.id || !byId[o.id]) return;
+        const bb = aabb(o, dims(o));
+        boxes.push(bb);
+        tx.push(bb.l, bb.cx, bb.r); ty.push(bb.t, bb.cy, bb.b);
+      });
+      drag.current.tx = tx; drag.current.ty = ty; drag.current.boxes = boxes;
+      drag.current.it = it; drag.current.im = im;
+    }
     e.currentTarget.setPointerCapture(e.pointerId);
   };
   const onMove = e => {
@@ -871,18 +945,40 @@ function Center({ s, fv }) {
     let patch;
     if (d.mode === 'move') {
       patch = { x: d.x + (e.clientX - d.sx) / scale, y: d.y + (e.clientY - d.sy) / scale };
+      // 스마트 가이드: 가까운 기준선(화면 6px 이내)에 가장자리·가운데를 붙임. Alt 누르면 자유 이동
+      if (snapOn && !e.altKey) {
+        const bb = aabb({ ...d.it, ...patch }, d.im), thr = 6 / scale;
+        const best = (cands, targets) => {
+          let m = null;
+          for (const c of cands) for (const t of targets) { const dd = t - c; if (Math.abs(dd) <= thr && (!m || Math.abs(dd) < Math.abs(m.dd))) m = { dd, t }; }
+          return m;
+        };
+        let mx = best([bb.l, bb.cx, bb.r], d.tx), my = best([bb.t, bb.cy, bb.b], d.ty);
+        // 간격 맞추기: 같은 줄(열)에 있는 두 라벨 사이 간격과 같아지는 자리
+        const gx = gapSnap(bb, d.boxes, 'x', thr), gy = gapSnap(bb, d.boxes, 'y', thr);
+        if (gx && (!mx || Math.abs(gx.dd) <= Math.abs(mx.dd))) mx = gx;
+        if (gy && (!my || Math.abs(gy.dd) <= Math.abs(my.dd))) my = gy;
+        if (mx) patch.x += mx.dd;
+        if (my) patch.y += my.dd;
+        const fb = aabb({ ...d.it, ...patch }, d.im); // 붙인 뒤 위치
+        const gaps = [mx, my].filter(m => m && m.gap).flatMap(m => m.segs(fb));
+        setGuides(mx || my ? { x: mx && !mx.gap ? [mx.t] : [], y: my && !my.gap ? [my.t] : [], gaps } : null);
+      } else setGuides(null);
     } else if (d.mode === 'resize') {
       const ns = Math.min(5, Math.max(0.2, d.s * Math.hypot(e.clientX - d.cx, e.clientY - d.cy) / d.d0));
       const bcx = d.x + d.w * d.s / 2, bcy = d.y + d.h * d.s / 2;
       patch = { s: ns, x: bcx - d.w * ns / 2, y: bcy - d.h * ns / 2 };
     } else {
       let rot = d.rot + (Math.atan2(e.clientY - d.cy, e.clientX - d.cx) - d.a0) * 180 / Math.PI;
-      if (e.shiftKey) rot = Math.round(rot / 15) * 15;
+      if (snapOn ? !e.altKey : e.shiftKey) rot = Math.round(rot / 15) * 15; // SNAP 켜짐: 15°씩 (Alt: 자유)
       patch = { rot: Math.round(rot * 10) / 10 };
     }
     store.set(st => ({ ...st, board: { ...st.board, layout: 'free', items: st.board.items.map(x => x.id === d.id ? { ...x, ...patch } : x) } }));
   };
-  const onUp = () => { drag.current = null; };
+  const onUp = () => {
+    if (drag.current) dropBoardHistIfSame();
+    drag.current = null; setGuides(null);
+  };
 
   const bgCls = { mat: 'bg-mat', grid: 'bg-grid', trans: 'bg-trans' }[board.bg] || '';
   // 판 비율과 상관없이 칸이 정사각형으로 보이도록 px 단위로 지정
@@ -895,6 +991,7 @@ function Center({ s, fv }) {
   return html`
     <main class="center">
       <div class="tb">
+        <button class="btn sq" title="배치 되돌리기 (Ctrl+Z)" disabled=${!boardHist.length} onClick=${undoBoard}>↶</button>
         <button class=${'btn' + (board.layout === 'auto' ? ' on' : '')} onClick=${() => relayout('auto')}>자동배치</button>
         <button class="btn" onClick=${() => relayout('scatter')}>흩뿌리기</button>
         <span style="width:8px"></span>
@@ -903,6 +1000,8 @@ function Center({ s, fv }) {
         <button class="btn sq" title="맨 앞으로" onClick=${front}>⤒</button>
         <button class="btn sq" title="맨 뒤로" onClick=${back}>⤓</button>
         <span class="sp"></span>
+        <button class=${'btn' + (snapOn ? ' on' : '')} title="스마트 가이드: 판·다른 라벨의 가장자리·가운데에 맞춰 붙기 (Alt 누르고 끌면 자유 이동)" onClick=${() => setUi({ snap: !snapOn })}>SNAP</button>
+        <span style="width:6px"></span>
         <span style="font-size:10px;letter-spacing:.1em">ZOOM</span>
         <button class="btn sq" onClick=${() => setUi({ zoom: Math.max(0.25, (s.ui.zoom || 1) - 0.25) })}>−</button>
         <button class="btn" onClick=${() => setUi({ zoom: 0 })}>${s.ui.zoom ? Math.round(s.ui.zoom * 100) + '%' : 'FIT'}</button>
@@ -921,14 +1020,38 @@ function Center({ s, fv }) {
               onPointerDown=${e => startDrag(e, it, 'move')}>
               <img src=${im.url} draggable="false" />
               ${sel === it.id ? html`
-                <span class="hdl rt" title="회전 (shift: 15°씩)" onPointerDown=${e => startDrag(e, it, 'rotate')}></span>
+                <span class="hdl rt" title=${snapOn ? '회전 (15°씩 · Alt: 자유)' : '회전 (shift: 15°씩)'} onPointerDown=${e => startDrag(e, it, 'rotate')}></span>
                 <span class="hdl rs" title="크기" onPointerDown=${e => startDrag(e, it, 'resize')}></span>` : null}
             </div>`;
           })}
+          ${guides ? guides.gaps.map(g => html`<div class=${'gap gap-' + g.ax} style=${g.ax === 'x'
+              ? `left:${g.a * scale}px;width:${(g.b - g.a) * scale}px;top:${g.c * scale}px`
+              : `top:${g.a * scale}px;height:${(g.b - g.a) * scale}px;left:${g.c * scale}px`}><span>${Math.round(g.b - g.a)}</span></div>`) : null}
+          ${guides ? html`${guides.x.map(x => html`<div class="guide gv" style=${`left:${x * scale}px`}></div>`)}${guides.y.map(y => html`<div class="guide gh" style=${`top:${y * scale}px`}></div>`)}` : null}
           ${!drawer.length ? html`<div class="empty">서랍이 비어 있어요<br/>왼쪽에서 라벨을 만들고 [PRINT!]</div>` : null}
         </div>
       </div>
     </main>`;
+}
+
+// 간격 맞추기 후보: 움직이는 상자 m 과 같은 줄에 있는 두 상자 A·B 의 간격 g 를 기준으로
+// A-B-[m] (뒤에), [m]-A-B (앞에), A-[m]-B (가운데) 세 자리 중 가장 가까운 곳
+function gapSnap(m, boxes, ax, thr) {
+  const [lo, hi, plo, phi] = ax === 'x' ? ['l', 'r', 't', 'b'] : ['t', 'b', 'l', 'r'];
+  const row = boxes.filter(o => o[plo] < m[phi] && o[phi] > m[plo]).sort((p, q) => p[lo] - q[lo]);
+  const mid = (p, q) => (Math.max(p[plo], q[plo]) + Math.min(p[phi], q[phi])) / 2;
+  const seg = (a, b, p, q) => ({ ax, a, b, c: mid(p, q) });
+  const size = m[hi] - m[lo];
+  let best = null;
+  const take = (dd, segs) => { if (Math.abs(dd) <= thr && (!best || Math.abs(dd) < Math.abs(best.dd))) best = { dd, gap: true, segs }; };
+  for (let i = 0; i < row.length; i++) for (let j = i + 1; j < row.length; j++) {
+    const A = row[i], B = row[j], g = B[lo] - A[hi];
+    if (g <= 0) continue;
+    take(B[hi] + g - m[lo], f => [seg(A[hi], B[lo], A, B), seg(B[hi], f[lo], B, f)]);
+    take(A[lo] - g - m[hi], f => [seg(f[hi], A[lo], f, A), seg(A[hi], B[lo], A, B)]);
+    if (g > size) take(A[hi] + (g - size) / 2 - m[lo], f => [seg(A[hi], f[lo], A, f), seg(f[hi], B[lo], f, B)]);
+  }
+  return best;
 }
 
 // 서랍에서 라벨 빼기 (서랍 ✕ / 판에서 Delete 키 공통)
@@ -955,14 +1078,73 @@ function Drawer({ s }) {
     return { ...next, board: syncBoard(next) };
   });
   const del = L => removeLabels([L.id]);
-  const move = (L, d) => store.set(st => {
-    const drawer = st.drawer.slice();
-    const i = drawer.findIndex(x => x.id === L.id), j = i + d;
-    if (j < 0 || j >= drawer.length) return st;
-    [drawer[i], drawer[j]] = [drawer[j], drawer[i]];
-    const next = { ...st, drawer };
-    return { ...next, board: syncBoard(next) };
-  });
+  // 드래그로 순서 바꾸기: 잡은 줄은 손가락을 따라오고, 나머지는 자리를 비켜주며 밀려남
+  const [dg, setDg] = useState(null); // { id, from, to, y0, dy, step }
+  const [settle, setSettle] = useState(false); // 놓는 순간엔 애니메이션 끄기 (자리 튐 방지)
+  const moved = useRef(false);
+  const onDown = (e, i) => {
+    if (e.button !== 0 || e.target.closest('input,button')) return;
+    const el = e.currentTarget;
+    moved.current = false;
+    const step = el.offsetHeight + 5; // 줄 높이 + 간격
+    const y0 = e.clientY, id = s.drawer[i].id, n = s.drawer.length;
+    const box = el.closest('.drawer'), st0 = box.scrollTop;
+    let lastY = y0, raf = 0, t0 = performance.now();
+    // 이동 거리 = 커서 이동 + 그동안 스크롤된 만큼
+    const update = () => {
+      const dy = lastY - y0 + box.scrollTop - st0;
+      if (!moved.current && Math.abs(dy) < 4) return;
+      moved.current = true;
+      const to = Math.max(0, Math.min(n - 1, i + Math.round(dy / step)));
+      setDg({ id, from: i, to, dy, step });
+    };
+    // 목록 위·아래 끝 근처(또는 바깥)로 끌면 자동 스크롤
+    const tick = now => {
+      const dt = Math.min(100, (now || performance.now()) - t0); t0 = now || performance.now(); // 프레임이 느려도 같은 속도
+      const r = box.getBoundingClientRect(), edge = 28;
+      let v = 0;
+      if (lastY < r.top + edge) v = -Math.min(14, (r.top + edge - lastY) / 3);
+      else if (lastY > r.bottom - edge) v = Math.min(14, (lastY - (r.bottom - edge)) / 3);
+      if (v && moved.current) {
+        const before = box.scrollTop;
+        box.scrollTop += v * dt / 16;
+        if (box.scrollTop !== before) update();
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    const mv = ev => { lastY = ev.clientY; update(); };
+    const up = () => {
+      cancelAnimationFrame(raf);
+      el.removeEventListener('pointermove', mv);
+      el.removeEventListener('pointerup', up);
+      el.removeEventListener('pointercancel', up);
+      setDg(d => {
+        if (d && d.to !== d.from) {
+          store.set(st => {
+            const drawer = st.drawer.slice();
+            const [x] = drawer.splice(d.from, 1);
+            drawer.splice(d.to, 0, x);
+            const next = { ...st, drawer };
+            return { ...next, board: syncBoard(next) };
+          });
+        }
+        return null;
+      });
+      setSettle(true);
+      requestAnimationFrame(() => requestAnimationFrame(() => setSettle(false)));
+    };
+    el.setPointerCapture(e.pointerId);
+    el.addEventListener('pointermove', mv);
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+  };
+  const shift = i => {
+    if (!dg) return 0;
+    if (dg.from < dg.to && i > dg.from && i <= dg.to) return -dg.step;
+    if (dg.to < dg.from && i >= dg.to && i < dg.from) return dg.step;
+    return 0;
+  };
   return html`
     <div class="sec">
       <div class="h">Drawer <i>서랍 · ${s.drawer.length}</i></div>
@@ -972,14 +1154,15 @@ function Drawer({ s }) {
           <button class="btn" onClick=${() => store.set(st => ({ ...st, selected: [] }))}>선택해제</button>
           <span style="font-size:10px;color:var(--ink-2)">${s.selected.length} 선택</span>
         </div>
-        <div class="drawer">
-          ${s.drawer.map(L => {
+        <div class=${'drawer' + (dg ? ' sorting' : '') + (settle ? ' settle' : '')}>
+          ${s.drawer.map((L, i) => {
             const im = labelImage(L, s.customFonts, 6);
-            return html`<div class=${'dr' + (s.editingId === L.id ? ' editing' : '')} key=${L.id}>
+            const me = dg && dg.id === L.id;
+            return html`<div class=${'dr' + (s.editingId === L.id ? ' editing' : '') + (me ? ' lifted' : '')} key=${L.id}
+              style=${`transform:translateY(${me ? dg.dy : shift(i)}px)`} title="끌어서 순서 바꾸기" onPointerDown=${e => onDown(e, i)}>
               <input type="checkbox" checked=${sel.has(L.id)} onChange=${() => toggle(L.id)} />
-              <span class="th" title="클릭해서 다시 편집" onClick=${() => edit(L)}><img src=${im.url} /></span>
+              <span class="th" title="클릭해서 다시 편집" onClick=${() => { if (!moved.current) edit(L); }}><img src=${im.url} draggable="false" /></span>
               <em>${L.orientation === 'free' ? L.freeW + '×' + L.freeH : L.tapeMm + 'mm'}</em>
-              <button class="x" title="위로" onClick=${() => move(L, -1)}>▲</button>
               <button class="x" title="복제" onClick=${() => dup(L)}>⧉</button>
               <button class="x" title="삭제" onClick=${() => del(L)}>✕</button>
             </div>`;
