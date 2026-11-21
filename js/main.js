@@ -384,24 +384,48 @@ function TypeSec({ s }) {
 
 const FRAMES = [['none', '없음', ''], ['solid', '실선', 'border:1px solid'], ['dotted', '점선', 'border:1px dotted'], ['double', '이중', 'border:3px double']];
 // 순서: 자유롭게 변형되는 것(가로/세로·길이) → 형식이 정해진 것
-const SPECIAL = [['dogtag', '◉▭', '군번줄'], ['wongoji', '▦', '원고지'], ['notebook', '⁘▭', '수첩'], ['lace', '⌒⌒', '레이스'],
+const SPECIAL = [['dogtag', '◉▭', '군번줄'], ['wongoji', '▦', '원고지'], ['notebook', '⁘▭', '수첩'], ['lace', '⌒⌒', '레이스'], ['lace2', '⟋⟋', '사선 레이스'],
   ['messenger', '💬', '메신저'], ['bubble', '◖ ◗', '말풍선'], ['bubble2', '☺◖', '말풍선|(캐릭터)'], ['burst', '✸', '강조 말풍선'],
-  ['music', '▶❚❚', '뮤직'], ['omamori', '⛩', '오마모리'], ['virus', '▣↗', '믿어주세요...']];
+  ['music', '▶❚❚', '뮤직'], ['music2', '♫ ━', '뮤직|(가사)'], ['omamori', '⛩', '오마모리'], ['virus', '▣↗', '믿어주세요...'],
+  ['search', '( ⌕)', '검색창'], ['chalk', '▬▭', '칠판'], ['sms', '▯✉', '문자'], ['dialog', '▭☒', '확인창']];
 const SPECIAL_PER_PAGE = 8;
 const VIRUS_TEXT = { ko: '절대\n바이러스\n아닙니다.\n믿어\n주세요... 전\n돌고래입니\n다', en: 'Totally not a\nvirus.Trust\nme...im a\ndolphin' };
 const SPECIAL_DEFAULT_TEXT = {
   music: '노래 제목\n아티스트', messenger: '자도 자도\n계속 자고 싶어요…', dogtag: 'NAME : 콩이\nID : 0412-HWY',
   wongoji: '오늘의 일기', bubble: '소녀가 되…', bubble2: '자도 자도\n계속 자고 싶어요…', omamori: '행운가득', notebook: '내일 일은 난 몰라',
   lace: '오늘의 기록', virus: VIRUS_TEXT.ko, burst: '이겨낸다!!',
+  lace2: '오늘의 기록', music2: '노래 제목\n아티스트\n세상 속에서 우리들도\n만남인 걸', search: '좋은 감자 만나는 법', chalk: '오늘의 할 일', sms: '좋은\n감자만나..', dialog: 'Do you want\nto be mine?',
 };
 // 특수 프레임 때문에 테이프 폭을 키웠으면 일반 프레임으로 돌아갈 때 원래 폭으로
 const leaveSpecial = l => l.tapePrev != null ? { frame: 'none', tapeMm: l.tapePrev, tapePrev: null } : { frame: 'none' };
-const CAN_VERTICAL = { dogtag: true, wongoji: true, notebook: true, lace: true }; // 세로형 지원 특수 프레임
+const CAN_VERTICAL = { dogtag: true, wongoji: true, notebook: true, lace: true, lace2: true }; // 세로형 지원 특수 프레임
 const BUBBLE_STYLES = [['round', '심플'], ['corner', '모서리 뾰족'], ['cloud', '구름']];
+// '2:25' ↔ 145초
+const secs = v => { const m = /^\s*-?\s*(\d+):(\d{1,2})\s*$/.exec(v || ''); return m ? +m[1] * 60 + +m[2] : null; };
+const mmss = n => `${Math.floor(n / 60)}:${String(Math.round(n % 60)).padStart(2, '0')}`;
 function FrameSec({ s }) {
   const L = s.label;
   const m = L.music || {};
   const setMusic = p => setLabel({ music: { ...m, ...p } });
+  // 진행도 · 지난 시간 · 남은 시간 연동 (전체 길이 = 지난 + 남은)
+  const total = (secs(m.cur) ?? 0) + Math.abs(secs(m.remain) ?? 0);
+  const onCur = v => {
+    const c = secs(v);
+    if (c == null || !total) return setMusic({ cur: v });
+    const t = Math.max(total, c);
+    setMusic({ cur: v, remain: '-' + mmss(t - c), progress: t ? c / t : 0 });
+  };
+  const onRemain = v => {
+    const r = secs(v), c = secs(m.cur);
+    if (r == null || c == null) return setMusic({ remain: v });
+    const t = c + Math.abs(r);
+    setMusic({ remain: v, progress: t ? c / t : 0 });
+  };
+  const onProg = v => {
+    if (!total) return setMusic({ progress: v });
+    const c = Math.round(total * v);
+    setMusic({ progress: v, cur: mmss(c), remain: '-' + mmss(total - c) });
+  };
   const bub = L.bubble || {};
   const setBub = p => setLabel({ bubble: { ...bub, ...p } });
   const pickSpecial = async v => {
@@ -417,10 +441,10 @@ function FrameSec({ s }) {
   const pickOther = v => setLabel(l => {
     if (l.frame === v) return leaveSpecial(l);
     const patch = { frame: v, orientation: CAN_VERTICAL[v] && l.orientation === 'v' ? 'v' : 'h' };
-    const minTape = { music: 24, dogtag: 18, bubble2: 18, bubble: 12, omamori: 12, virus: 24, burst: 12, lace: 12 }[v];
+    const minTape = { music: 24, dogtag: 18, bubble2: 18, bubble: 12, omamori: 12, virus: 24, burst: 12, lace: 12, lace2: 12, music2: 24, sms: 24, chalk: 12, dialog: 18 }[v];
     if (minTape && l.tapeMm < minTape) { patch.tapeMm = minTape; patch.tapePrev = l.tapePrev ?? l.tapeMm; }
     // 기존 일반 라벨 텍스트면 프레임에 맞는 예시로 채움
-    if (!SPECIAL_DEFAULT_TEXT[l.frame] && (v === 'music' || v === 'messenger' || v === 'dogtag') && !l.text.includes('\n')) patch.text = SPECIAL_DEFAULT_TEXT[v];
+    if (!SPECIAL_DEFAULT_TEXT[l.frame] && (v === 'music' || v === 'music2' || v === 'messenger' || v === 'dogtag' || v === 'sms' || v === 'dialog') && !l.text.includes('\n')) patch.text = SPECIAL_DEFAULT_TEXT[v];
     if (!l.text.trim()) patch.text = SPECIAL_DEFAULT_TEXT[v];
     if (patch.text) { patch.marks = {}; patch.lineSizes = []; }
     return patch;
@@ -443,14 +467,14 @@ function FrameSec({ s }) {
         ${Array.from({ length: pages }, (_, i) => html`<button class=${i === page ? 'on' : ''} onClick=${() => setPage(i)}>${i + 1}</button>`)}
         <button disabled=${page === pages - 1} onClick=${() => setPage(page + 1)}>›</button>
       </div>` : null}
-      ${L.frame === 'music' ? html`
+      ${L.frame === 'music' || L.frame === 'music2' ? html`
         <div class="opt-box">
           <div class="row"><span class="lbl">시간</span>
-            <input class="num" value=${m.cur} onInput=${e => setMusic({ cur: e.target.value })} />
-            <input class="num" value=${m.remain} onInput=${e => setMusic({ remain: e.target.value })} />
+            <input class="num" value=${m.cur} onInput=${e => onCur(e.target.value)} />
+            <input class="num" value=${m.remain} onInput=${e => onRemain(e.target.value)} />
           </div>
-          <${Range} label="진행" min=${0} max=${1} step=${0.01} value=${m.progress ?? 0.8} onInput=${v => setMusic({ progress: v })} fmt=${v => Math.round(v * 100) + '%'} />
-          <div class="muted">첫 줄 제목 · 둘째 줄 아티스트 · 커버는 DECO의 MAIN</div>
+          <${Range} label="진행" min=${0} max=${1} step=${0.01} value=${m.progress ?? 0.8} onInput=${onProg} fmt=${v => Math.round(v * 100) + '%'} />
+          <div class="muted">${L.frame === 'music' ? '첫 줄 제목 · 둘째 줄 아티스트 · 커버는 DECO의 COVER' : '첫 줄 제목 · 둘째 줄 아티스트 · 셋째 줄부터 가사'}</div>
         </div>` : null}
       ${L.frame === 'bubble' || L.frame === 'bubble2' || L.frame === 'messenger' ? html`
         <div class="opt-box">
@@ -486,6 +510,22 @@ function FrameSec({ s }) {
             <button class="btn" onClick=${() => setText(VIRUS_TEXT.en)}>English</button>
           </div>
           <div class="muted">그림은 DECO의 ICON · 이름 칸 색은 잉크 + COLOR의 반전색</div>
+        </div>` : null}
+      ${L.frame === 'sms' ? html`
+        <div class="opt-box">
+          <div class="row"><span class="lbl">시간</span>
+            <input class="num" value=${L.sms?.time ?? '12:34'} onInput=${e => setLabel({ sms: { ...(L.sms || {}), time: e.target.value } })} />
+          </div>
+          <div class="row"><label class="check"><input type="checkbox" checked=${!!L.sms?.fill} onChange=${e => setLabel({ sms: { ...(L.sms || {}), fill: e.target.checked } })} /> 화면을 반전색으로 채우기</label></div>
+        </div>` : null}
+      ${L.frame === 'dialog' ? html`
+        <div class="opt-box">
+          <div class="row"><span class="lbl">버튼</span>
+            <input class="num" style="width:64px" value=${L.dialog?.yes ?? 'yes'} onInput=${e => setLabel({ dialog: { ...(L.dialog || {}), yes: e.target.value } })} />
+            <input class="num" style="width:64px" value=${L.dialog?.no ?? 'always'} onInput=${e => setLabel({ dialog: { ...(L.dialog || {}), no: e.target.value } })} />
+          </div>
+          <div class="row"><label class="check"><input type="checkbox" checked=${L.dialog?.cursor !== false} onChange=${e => setLabel({ dialog: { ...(L.dialog || {}), cursor: e.target.checked } })} /> 마우스 커서</label></div>
+          <div class="muted">버튼 칸을 비우면 그 버튼은 숨겨요</div>
         </div>` : null}
       ${L.frame === 'burst' ? html`<div class="opt-box"><div class="muted">색은 잉크 + COLOR의 반전색</div></div>` : null}
       ${L.frame === 'messenger' ? html`

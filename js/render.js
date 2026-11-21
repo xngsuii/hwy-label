@@ -77,7 +77,7 @@ export function layoutLabel(L, family) {
   const crossDecoCount = crossDecoKeys.filter(k => deco[k]).length;
 
   const baseC = Math.max(1, crossSize - 2 * (fs0 + padC));
-  const cdSize = baseC * 0.17 * (L.decoScale || 1); // 가장자리 장식 높이
+  const cdSize = baseC * 0.153 * (L.decoScale || 1); // 가장자리 장식 높이
   const cdGap = cdSize * 0.3;
   const crossDecoSpace = crossDecoCount * (cdSize + cdGap);
   let innerC = Math.max(0.5, baseC - crossDecoSpace);
@@ -130,7 +130,7 @@ export function layoutLabel(L, family) {
     const { w, h } = iconSize(name);
     if (!w) return null;
     // 아이콘을 (교차 길이 × 교차 길이) 상자 안에 비율 유지로 맞춤
-    const box = (hero ? Math.min(heroH, innerC) : Math.min(innerC, baseC)) * 0.6 * (L.decoScale || 1);
+    const box = (hero ? Math.min(heroH, innerC) : Math.min(innerC, baseC)) * 0.54 * (L.decoScale || 1);
     const cell = box / Math.max(w, h);
     const iw = w * cell, ih = h * cell;
     return { name, w: iw, h: ih, len: vert ? ih : iw };
@@ -627,7 +627,7 @@ function drawBubble(ctx, st, x, y, w, h, { side = 'left', tail = 'corner', tl, f
       circle(ctx, cx0 - tl * 0.5, y + h + b + tl * 0.9, tl * 0.16); paint();
     }
   } else {
-    const r = Math.min(radius ?? (st === 'corner' ? h * 0.32 : h * 0.42), w / 2);
+    const r = Math.min(radius ?? (st === 'corner' ? h * 0.32 : h * 0.31), w / 2);
     const cy = y + h / 2;
     ctx.beginPath();
     ctx.moveTo(x + r, y);
@@ -640,9 +640,12 @@ function drawBubble(ctx, st, x, y, w, h, { side = 'left', tail = 'corner', tl, f
     if (st === 'corner') {
       ctx.lineTo(x, y + h);
     } else if (tail === 'corner') {
-      ctx.lineTo(x + r * 0.5, y + h);
-      ctx.lineTo(x - tl * 0.6, y + h);
-      ctx.quadraticCurveTo(x, y + h - tl * 0.15, x, y + h - r * 0.95);
+      // 레퍼런스 이미지 외곽선을 그대로 따라 그린 꼬리 (말풍선 높이 h 비율)
+      ctx.lineTo(x + h * 0.24, y + h);
+      ctx.quadraticCurveTo(x + h * 0.13, y + h, x + h * 0.11, y + h * 0.93);         // 작은 둥근 모서리 → 파인 곳 꼭대기
+      ctx.quadraticCurveTo(x + h * 0.07, y + h, x - h * 0.02, y + h);                // 파인 곳 → 꼬리 아랫면
+      ctx.quadraticCurveTo(x - h * 0.09, y + h, x - h * 0.13, y + h * 0.99);         // 꼬리 끝
+      ctx.quadraticCurveTo(x - h * 0.02, y + h * 0.93, x, y + h * 0.8);              // 바깥 곡선 (얇게)
     } else {
       ctx.lineTo(x + r, y + h); ctx.arcTo(x, y + h, x, y + h - r, r);
     }
@@ -1216,5 +1219,323 @@ const OMAMORI2 = {
   },
 };
 
-const SPECIAL = { music: MUSIC, messenger: MESSENGER, dogtag: DOGTAG, wongoji: WONGOJI, bubble: BUBBLE, bubble2: BUBBLE2, omamori: OMAMORI, notebook: NOTEBOOK, lace: LACE, virus: VIRUS, burst: BURST };
+
+// ---------- 공통: 플레이 바 (진행 바 + 시간 + ⏪ ❚❚ ⏩) ----------
+// y = 진행 바 위치, u = 기준 크기(mm). 아래 끝 y 반환
+function playerBar(ctx, L, family, x, w, y, u, P) {
+  const m = L.music || {};
+  const ink = L.inkColor;
+  ctx.fillStyle = ink;
+  const th = Math.max(1.2 / P, u * 0.028);
+  const prog = Math.min(1, Math.max(0, m.progress ?? 0.8));
+  ctx.save(); ctx.globalAlpha = 0.25; rrect(ctx, x, y - th / 2, w, th, th / 2); ctx.fill(); ctx.restore();
+  rrect(ctx, x, y - th / 2, w * prog, th, th / 2); ctx.fill();
+  const fTime = u * 0.075;
+  ctx.save(); ctx.globalAlpha = 0.72;
+  ctx.font = boldStr(L, family, fTime, 400); ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left'; ctx.fillText(m.cur ?? '', x, y + u * 0.085);
+  ctx.textAlign = 'right'; ctx.fillText(m.remain ?? '', x + w, y + u * 0.085);
+  ctx.restore();
+  const cy = y + u * 0.24, cx = x + w / 2, s = u * 0.11;
+  const bw = s * 0.32;
+  ctx.fillRect(cx - bw * 1.4, cy - s * 0.62, bw, s * 1.24);
+  ctx.fillRect(cx + bw * 0.4, cy - s * 0.62, bw, s * 1.24);
+  const tri = (tx, dir) => {
+    ctx.beginPath();
+    ctx.moveTo(tx, cy - s / 2); ctx.lineTo(tx + dir * s * 0.8, cy); ctx.lineTo(tx, cy + s / 2); ctx.closePath(); ctx.fill();
+  };
+  const off = u * 0.42;
+  tri(cx - off + s * 0.8, -1); tri(cx - off + s * 1.5, -1);
+  tri(cx + off - s * 0.8, 1); tri(cx + off - s * 1.5, 1);
+  return cy + s * 0.62;
+}
+
+// ---------- 뮤직 (가사) : 커버 없이 제목 / 아티스트 / 가사 / 플레이 바 ----------
+const MUSIC2 = {
+  layout(L, family) {
+    const all = linesOf(L);
+    const [title = { text: '', k: 1, gs: [] }, artist = { text: '', k: 1, gs: [] }] = all;
+    const lyrics = all.slice(2);
+    const T = L.tapeMm, pad = T * 0.09, lead = Math.max(1, L.leading);
+    const W = L.lengthMode === 'fixed' && L.orientation !== 'v' ? Math.max(T, L.lengthMm) : T;
+    const inner = W - 2 * pad;
+    const fT = T * 0.085, fA = T * 0.065;
+    let fL = autoFs(L, T * 0.068);
+    const lw = maxLineW(L, family, lyrics, fL);
+    if (L.sizeMode !== 'manual' && lw > inner) fL *= inner / lw;
+    const u = inner * 1.05;
+    const top = pad;
+    const yT = top + fT * 0.6, yA = yT + fT * 0.6 + fA * 0.85;
+    const yL0 = yA + fA * 0.5 + (lyrics.length ? T * 0.07 : 0);
+    const lyH = lyrics.length * fL * lead;
+    const yBar = yL0 + lyH + T * 0.08;
+    const H = yBar + u * 0.3 + pad;
+    return { special: 'music2', wMm: W, hMm: H, title, artist, lyrics, fT, fA, fL, lead, pad, inner, u, yT, yA, yL0, yBar };
+  },
+  draw(ctx, L, family, Y, P) {
+    const { wMm: W, title, artist, lyrics, fT, fA, fL, lead, pad, inner, u, yT, yA, yL0, yBar } = Y;
+    const ink = L.inkColor;
+    ctx.fillStyle = ink;
+    txt(ctx, L, family, { ...title, gs: title.gs.map(g => ({ ...g, st: { ...g.st, bold: true } })) }, W / 2, yT, fT, 'center', inner);
+    ctx.save(); ctx.globalAlpha = 0.72;
+    txt(ctx, L, family, artist, W / 2, yA, fA, 'center', inner);
+    ctx.restore();
+    ctx.fillStyle = ink;
+    lyrics.forEach((l, i) => txt(ctx, L, family, l, W / 2, yL0 + i * fL * lead + fL * lead / 2, fL, 'center', inner));
+    playerBar(ctx, L, family, pad, inner, yBar, u, P);
+  },
+};
+
+// ---------- 사선 레이스: 모서리에 레이스 테이프가 비스듬히 붙은 모양 ----------
+const LACE2 = {
+  layout(L, family) {
+    const vert = L.orientation === 'v';
+    const lines = linesOf(L), n = Math.max(1, lines.length), lead = Math.max(1, L.leading);
+    const T = L.tapeMm, pad = T * 0.14;
+    const area0 = T - 2 * pad;
+    if (vert) {
+      let fs = autoFs(L, area0 / (1 + (n - 1) * lead) * 0.8);
+      if (L.wrapMode !== 'grow') fs = Math.min(fs, area0 / (1 + (n - 1) * lead));
+      const charStep = fs * (1.05 + (L.tracking || 0) / 100);
+      const maxC = Math.max(1, ...lines.map(c => c.gs.length * c.k));
+      const H = L.lengthMode === 'fixed' ? L.lengthMm : Math.max(T * 1.6, maxC * charStep + T * 1.0);
+      return { special: 'lace2', vert, wMm: T, hMm: H, lines, n, lead, fs, charStep, maxC, T };
+    }
+    let fs = autoFs(L, area0 / (n * lead) * 0.85);
+    if (L.wrapMode !== 'grow') fs = Math.min(fs, area0 / (n * lead));
+    const H = Math.max(T, n * fs * lead + 2 * pad);
+    const bx = T * 0.5;
+    const W = L.lengthMode === 'fixed' ? L.lengthMm : Math.max(T * 1.8, maxLineW(L, family, lines, fs) + 2 * bx);
+    return { special: 'lace2', vert, wMm: W, hMm: H, lines, n, lead, fs, bx, T };
+  },
+  draw(ctx, L, family, Y, P) {
+    const { wMm: W, hMm: H, lines, n, lead, fs, T } = Y;
+    const ink = L.inkColor, lw = Math.max(1 / P, T * 0.012);
+    const band = T * 0.2, d = T * 0.55; // 띠 폭, 모서리에서 띠 중심까지
+    const strip = () => {
+      // 왼쪽 위 모서리를 가로지르는 띠 (라벨 밖은 잘림)
+      const len = d * Math.SQRT2 + band * 2;
+      ctx.save();
+      ctx.translate(0, d); ctx.rotate(-Math.PI / 4);
+      ctx.translate(-band, -band / 2);
+      laceBand(ctx, len, band, ink, lw);
+      ctx.restore();
+    };
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.clip();
+    strip();
+    ctx.save(); ctx.translate(W, H); ctx.rotate(Math.PI); strip(); ctx.restore();
+    ctx.restore();
+    ctx.fillStyle = ink;
+    if (Y.vert) {
+      const textH = Y.maxC * Y.charStep;
+      vCols(ctx, L, family, lines, W / 2, (H - textH) / 2, fs, fs * lead, Y.charStep);
+      return;
+    }
+    const y0 = (H - n * fs * lead) / 2 + fs * lead / 2;
+    const [tx, al] = alignedX(L, Y.bx, W - 2 * Y.bx);
+    lines.forEach((l, i) => txt(ctx, L, family, l, tx, y0 + i * fs * lead, fs, al, W - 2 * Y.bx));
+  },
+};
+
+// ---------- 검색창 ----------
+const SEARCH = {
+  layout(L, family) {
+    const lines = linesOf(L), n = Math.max(1, lines.length), lead = Math.max(1, L.leading);
+    const T = L.tapeMm, pad = T * 0.12;
+    const h0 = T - 2 * pad;
+    let fs = autoFs(L, Math.min(h0 * 0.42, h0 * 0.7 / (n * lead)));
+    const h = Math.max(h0, n * fs * lead / 0.7);
+    const H = h + 2 * pad;
+    const tx = pad + h * 0.42, iconW = h * 0.95;
+    const W = L.lengthMode === 'fixed' ? L.lengthMm : Math.max(T * 2.5, tx + maxLineW(L, family, lines, fs) + fs * 0.5 + iconW + pad);
+    return { special: 'search', wMm: W, hMm: H, lines, n, lead, fs, pad, h, tx, iconW, T };
+  },
+  draw(ctx, L, family, Y, P) {
+    const { wMm: W, lines, n, lead, fs, pad, h, tx, iconW, T } = Y;
+    const ink = L.inkColor, lw = Math.max(1 / P, T * 0.03);
+    rrect(ctx, pad, pad, W - 2 * pad, h, h / 2);
+    ctx.fillStyle = '#ffffff'; ctx.fill();
+    ctx.strokeStyle = ink; ctx.lineWidth = lw; ctx.stroke();
+    // 돋보기
+    const cx = W - pad - iconW * 0.55, cy = pad + h / 2 - h * 0.05, r = h * 0.17;
+    circle(ctx, cx, cy, r); ctx.lineWidth = lw * 0.9; ctx.stroke();
+    ctx.lineCap = 'round'; ctx.lineWidth = lw * 1.1;
+    ctx.beginPath(); ctx.moveTo(cx + r * 0.72, cy + r * 0.72); ctx.lineTo(cx + r * 1.6, cy + r * 1.6); ctx.stroke();
+    ctx.lineCap = 'butt';
+    // 글자 + 입력 커서
+    ctx.fillStyle = ink;
+    const maxW = W - tx - iconW - pad;
+    const y0 = pad + (h - n * fs * lead) / 2 + fs * lead / 2;
+    lines.forEach((l, i) => txt(ctx, L, family, l, tx, y0 + i * fs * lead, fs, 'left', maxW));
+    const last = lines[lines.length - 1];
+    const cxr = tx + Math.min(maxW, lineW(L, family, last, fs)) + fs * 0.18;
+    const cyr = y0 + (n - 1) * fs * lead;
+    ctx.fillRect(cxr, cyr - fs * last.k * 0.55, Math.max(1 / P, fs * 0.06), fs * last.k * 1.1);
+  },
+};
+
+// ---------- 칠판 ----------
+const CHALK = {
+  layout(L, family) {
+    const lines = linesOf(L), n = Math.max(1, lines.length), lead = Math.max(1, L.leading);
+    const T = L.tapeMm, fw = T * 0.08, tray = T * 0.13, ip = T * 0.08;
+    const area0 = T - fw - tray - 2 * ip;
+    let fs = autoFs(L, area0 / (n * lead) * 0.85);
+    if (L.wrapMode !== 'grow') fs = Math.min(fs, area0 / (n * lead));
+    const H = Math.max(T, n * fs * lead + fw + tray + 2 * ip);
+    const bx = T * 0.18;
+    const W = L.lengthMode === 'fixed' ? L.lengthMm : Math.max(T * 1.8, maxLineW(L, family, lines, fs) + 2 * fw + 2 * bx);
+    return { special: 'chalk', wMm: W, hMm: H, lines, n, lead, fs, fw, tray, bx, T };
+  },
+  draw(ctx, L, family, Y, P) {
+    const { wMm: W, hMm: H, lines, n, lead, fs, fw, tray, bx, T } = Y;
+    const ink = L.inkColor, chalk = L.invColor || '#ffffff', lw = Math.max(1 / P, T * 0.012);
+    // 나무 틀 (테이프색) + 칠판 면 (잉크색)
+    ctx.strokeStyle = ink; ctx.lineWidth = lw;
+    ctx.strokeRect(lw / 2, lw / 2, W - lw, H - lw);
+    ctx.fillStyle = ink; ctx.fillRect(fw, fw, W - 2 * fw, H - fw - tray);
+    // 나뭇결
+    ctx.save(); ctx.globalAlpha = 0.35; ctx.lineWidth = lw * 0.8;
+    ctx.beginPath();
+    ctx.moveTo(fw * 1.5, fw * 0.5); ctx.lineTo(W * 0.4, fw * 0.5);
+    ctx.moveTo(W * 0.6, fw * 0.45); ctx.lineTo(W - fw * 1.5, fw * 0.45);
+    ctx.stroke(); ctx.restore();
+    // 분필 받침 + 분필 두 개 + 지우개
+    const ty = H - tray;
+    ctx.beginPath(); ctx.moveTo(fw * 0.6, ty + tray * 0.35); ctx.lineTo(W - fw * 0.6, ty + tray * 0.35); ctx.stroke();
+    ctx.fillStyle = '#ffffff';
+    const ch = tray * 0.26;
+    [[W * 0.62, T * 0.16], [W * 0.62 + T * 0.2, T * 0.1]].forEach(([x, w]) => { ctx.fillRect(x, ty + tray * 0.35 - ch, w, ch); ctx.strokeRect(x, ty + tray * 0.35 - ch, w, ch); });
+    ctx.fillStyle = ink; ctx.fillRect(W * 0.22, ty + tray * 0.35 - tray * 0.32, T * 0.26, tray * 0.32);
+    // 분필 글씨
+    ctx.fillStyle = chalk;
+    const top = fw, bot = H - tray;
+    const y0 = top + (bot - top - n * fs * lead) / 2 + fs * lead / 2;
+    const [tx, al] = alignedX(L, fw + bx, W - 2 * fw - 2 * bx);
+    ctx.save(); ctx.globalAlpha = 0.93;
+    lines.forEach((l, i) => txt(ctx, L, family, l, tx, y0 + i * fs * lead, fs, al, W - 2 * fw - 2 * bx));
+    ctx.restore();
+  },
+};
+
+// ---------- 문자메시지 (폴더폰 화면) ----------
+const SMS = {
+  layout(L, family) {
+    const lines = linesOf(L), n = Math.max(1, lines.length), lead = Math.max(1, L.leading);
+    const T = L.tapeMm, pad = T * 0.07;
+    const W = T;
+    const sb = T * 0.12, gap = T * 0.05, keys = T * 0.11;
+    const boxW = W - 2 * pad - T * 0.06, bx = T * 0.06, by = T * 0.06;
+    let fs = autoFs(L, T * 0.11);
+    const tw = maxLineW(L, family, lines, fs);
+    if (L.sizeMode !== 'manual' && tw > boxW - 2 * bx) fs *= (boxW - 2 * bx) / tw;
+    const boxH = Math.max(T * 0.42, n * fs * lead + 2 * by);
+    const H = pad + sb + gap + boxH + gap + keys + pad;
+    return { special: 'sms', wMm: W, hMm: H, lines, n, lead, fs, pad, sb, gap, keys, boxW, boxH, bx, by, T };
+  },
+  draw(ctx, L, family, Y, P) {
+    const { wMm: W, hMm: H, lines, fs, lead, pad, sb, gap, keys, boxW, boxH, bx, by, T } = Y;
+    const ink = L.inkColor, lw = Math.max(1 / P, T * 0.012);
+    ctx.strokeStyle = ink; ctx.fillStyle = ink; ctx.lineWidth = lw; ctx.lineJoin = 'round';
+    // 화면 테두리 (+ 반전색 채우기)
+    rrect(ctx, pad * 0.5, pad * 0.5, W - pad, H - pad, T * 0.07);
+    if (L.sms?.fill) { ctx.fillStyle = L.invColor || '#ffffff'; ctx.fill(); ctx.fillStyle = ink; }
+    ctx.stroke();
+    // 상태 표시줄: 안테나 / 시간 / 배터리
+    const sy = pad + sb / 2, u = sb * 0.7;
+    for (let i = 0; i < 4; i++) { const bh = u * (0.3 + i * 0.23); ctx.fillRect(pad + i * u * 0.28, sy + u / 2 - bh, u * 0.18, bh); }
+    ctx.font = boldStr(L, family, u * 0.8, 400); ctx.textBaseline = 'middle'; ctx.textAlign = 'center';
+    ctx.fillText(L.sms?.time ?? '12:34', W / 2, sy);
+    const bw = u * 1.1, bxx = W - pad - bw - u * 0.12;
+    ctx.strokeRect(bxx, sy - u * 0.3, bw, u * 0.6);
+    ctx.fillRect(bxx + bw, sy - u * 0.14, u * 0.12, u * 0.28);
+    for (let i = 0; i < 3; i++) ctx.fillRect(bxx + u * 0.1 + i * bw * 0.3, sy - u * 0.18, bw * 0.22, u * 0.36);
+    ctx.beginPath(); ctx.moveTo(pad, pad + sb); ctx.lineTo(W - pad, pad + sb); ctx.stroke();
+    // 메시지 상자
+    const bx0 = (W - boxW) / 2, by0 = pad + sb + gap;
+    rrect(ctx, bx0, by0, boxW, boxH, T * 0.05); ctx.stroke();
+    ctx.fillStyle = ink;
+    const y0 = by0 + by + fs * lead / 2;
+    const [tx, al] = alignedX(L.align === 'center' || L.align === 'right' ? L : { ...L, align: 'left' }, bx0 + bx, boxW - 2 * bx);
+    lines.forEach((l, i) => txt(ctx, L, family, l, tx, y0 + i * fs * lead, fs, al, boxW - 2 * bx));
+    // 전송 버튼
+    const ky = by0 + boxH + gap, kw = W * 0.3, kh = keys * 0.75, kx = W - pad - kw;
+    ctx.font = boldStr(L, family, kh * 0.62, 400); ctx.textAlign = 'center';
+    rrect(ctx, kx, ky, kw, kh, kh * 0.3); ctx.stroke();
+    ctx.fillText('전송', kx + kw / 2, ky + kh / 2);
+  },
+};
+
+// ---------- 확인창 (옛날 운영체제 대화상자) ----------
+const DIALOG = {
+  layout(L, family) {
+    const lines = linesOf(L), n = Math.max(1, lines.length), lead = Math.max(1, L.leading);
+    const T = L.tapeMm, o = T * 0.04;            // 바깥 여백
+    const tb = T * 0.15;                          // 제목 줄 높이
+    let fs = autoFs(L, T * 0.12);
+    const fb = T * 0.085, bh = T * 0.16, bgap = T * 0.08;
+    const labels = [L.dialog?.yes ?? 'yes', L.dialog?.no ?? 'always'].filter(t => t.trim());
+    const f100 = boldStr(L, family, 100, 400);
+    const bws = labels.map(t => Math.max(T * 0.42, textW(f100, t, fb) + T * 0.16));
+    const btnRow = bws.reduce((a, b) => a + b, 0) + bgap * Math.max(0, bws.length - 1);
+    const px = T * 0.16;
+    const W = L.lengthMode === 'fixed' ? L.lengthMm : Math.max(T * 1.5, maxLineW(L, family, lines, fs) + 2 * px + 2 * o, btnRow + 2 * px + 2 * o);
+    const textTop = o + tb + T * 0.1;
+    const textH = n * fs * lead;
+    const btnY = textTop + textH + T * 0.09;
+    const H = btnY + (labels.length ? bh + T * 0.1 : 0) + o + T * 0.02;
+    return { special: 'dialog', wMm: W, hMm: H, lines, n, lead, fs, o, tb, fb, bh, bgap, labels, bws, btnRow, px, textTop, btnY, T };
+  },
+  draw(ctx, L, family, Y, P) {
+    const { wMm: W, hMm: H, lines, lead, fs, o, tb, fb, bh, bgap, labels, bws, btnRow, px, textTop, btnY, T } = Y;
+    const ink = L.inkColor, lw = Math.max(1 / P, T * 0.013);
+    ctx.strokeStyle = ink; ctx.lineWidth = lw; ctx.lineJoin = 'round';
+    // 창 + 제목 줄
+    rrect(ctx, o, o, W - 2 * o, H - 2 * o, T * 0.02); ctx.fillStyle = '#ffffff'; ctx.fill(); ctx.stroke();
+    // 제목 줄: 테이프색을 조금 진하게
+    ctx.save(); ctx.clip();
+    ctx.fillStyle = L.tapeColor; ctx.fillRect(o, o, W - 2 * o, tb);
+    ctx.globalAlpha = 0.16; ctx.fillStyle = ink; ctx.fillRect(o, o, W - 2 * o, tb);
+    ctx.restore();
+    rrect(ctx, o, o, W - 2 * o, H - 2 * o, T * 0.02); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(o, o + tb); ctx.lineTo(W - o, o + tb); ctx.stroke();
+    // _ □ ×
+    const s = tb * 0.62, gy = o + (tb - s) / 2;
+    for (let i = 0; i < 3; i++) {
+      const gx = W - o - tb * 0.2 - (3 - i) * (s + tb * 0.12) + tb * 0.12;
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(gx, gy, s, s); ctx.strokeRect(gx, gy, s, s);
+      ctx.beginPath();
+      if (i === 0) { ctx.moveTo(gx + s * 0.25, gy + s * 0.7); ctx.lineTo(gx + s * 0.75, gy + s * 0.7); }
+      else if (i === 1) { ctx.rect(gx + s * 0.28, gy + s * 0.28, s * 0.44, s * 0.44); }
+      else { ctx.moveTo(gx + s * 0.28, gy + s * 0.28); ctx.lineTo(gx + s * 0.72, gy + s * 0.72); ctx.moveTo(gx + s * 0.72, gy + s * 0.28); ctx.lineTo(gx + s * 0.28, gy + s * 0.72); }
+      ctx.stroke();
+    }
+    // 본문
+    ctx.fillStyle = ink;
+    const [tx, al] = alignedX(L, o + px, W - 2 * o - 2 * px);
+    lines.forEach((l, i) => txt(ctx, L, family, l, tx, textTop + fs * lead / 2 + i * fs * lead, fs, al, W - 2 * o - 2 * px));
+    // 버튼
+    let bx = (W - btnRow) / 2;
+    let last = null;
+    ctx.font = boldStr(L, family, fb, 400); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    labels.forEach((t, i) => {
+      rrect(ctx, bx, btnY, bws[i], bh, bh * 0.22); ctx.stroke();
+      ctx.fillText(t, bx + bws[i] / 2, btnY + bh / 2);
+      last = [bx, bws[i]];
+      bx += bws[i] + bgap;
+    });
+    // 마우스 커서 (마지막 버튼 오른쪽 아래)
+    if (last && L.dialog?.cursor !== false) {
+      const c = T * 0.15, cx = last[0] + last[1] * 0.82, cy = btnY + bh * 0.45;
+      const pts = [[0, 0], [0, 1], [0.27, 0.76], [0.45, 1.12], [0.6, 1.05], [0.42, 0.7], [0.75, 0.7]];
+      ctx.beginPath();
+      pts.forEach(([a, b], i) => i ? ctx.lineTo(cx + a * c, cy + b * c) : ctx.moveTo(cx + a * c, cy + b * c));
+      ctx.closePath();
+      ctx.fillStyle = '#ffffff'; ctx.fill(); ctx.lineWidth = lw * 0.9; ctx.stroke();
+    }
+  },
+};
+
+const SPECIAL = { music: MUSIC, messenger: MESSENGER, dogtag: DOGTAG, wongoji: WONGOJI, bubble: BUBBLE, bubble2: BUBBLE2, omamori: OMAMORI, notebook: NOTEBOOK, lace: LACE, virus: VIRUS, burst: BURST, music2: MUSIC2, lace2: LACE2, search: SEARCH, chalk: CHALK, sms: SMS, dialog: DIALOG };
 export const isSpecialFrame = f => !!SPECIAL[f];
