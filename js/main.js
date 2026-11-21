@@ -1,7 +1,7 @@
 import { html, render, useState, useEffect, useRef, useMemo, useCallback } from 'https://cdn.jsdelivr.net/npm/htm@3.1.1/preact/standalone.module.js';
 import { store, setLabel, setUi, setBoard, defaultLabel, uid, TAPE_WIDTHS, exportBackup, importBackup } from './store.js';
 import { BUILTIN_FONTS, fontById, ensureFont, registerCustomFont, loadStoredFonts, saveStoredFonts } from './fonts.js';
-import { renderLabel, layoutLabel, clearMeasureCache, canvasToBlob, isSpecialFrame } from './render.js';
+import { renderLabel, layoutLabel, clearMeasureCache, canvasToBlob, isSpecialFrame, isTxtDeco } from './render.js';
 import { ICON_GROUPS, iconSvg, iconSize, setCustomIcons } from './pixel.js';
 import { BOARD_SIZES, BOARD_PPM, boardDims, autoLayout, scatterLayout, syncBoard, renderBoard } from './board.js';
 import { loadImageFile, toBitmap, rowsToCanvas } from './bitmap.js';
@@ -131,6 +131,7 @@ const UI_ICONS = {
   underline: ['XX...XX', 'XX...XX', 'XX...XX', 'XX...XX', '.XXXXX.', '.......', 'XXXXXXX'],
   strike:    ['.XXXXX.', 'XX.....', '.XXX...', 'XXXXXXX', '....XX.', 'X...XX.', '.XXXX..'],
   outline:   ['..XXX..', '.X...X.', 'X..X..X', 'X.X.X.X', 'X.XXX.X', 'X.X.X.X', 'XXX.XXX'],
+  pt:        ['...X...', '..X.X..', '.X...X.', '.XXXXX.', '.X...X.', '.......', 'XXXXXXX'],
   hl:        ['XXXXXXX', 'XXX.XXX', 'XX.X.XX', 'XX.X.XX', 'XX...XX', 'XX.X.XX', 'XXXXXXX'],
   al_left:   ['XXXXXXX', '.......', 'XXXX...', '.......', 'XXXXXXX', '.......', 'XXXX...'],
   al_center: ['XXXXXXX', '.......', '.XXXXX.', '.......', 'XXXXXXX', '.......', '.XXXXX.'],
@@ -288,7 +289,7 @@ function TextSec({ s, taRef }) {
       </div>
       <div class="row">
         <span class="lbl">스타일</span>
-        ${B('bold', '굵게')}${B('italic', '기울임')}${B('underline', '밑줄')}${B('strike', '취소선')}${B('outline', '외곽선')}${B('hl', '텍스트 배경색')}
+        ${B('bold', '굵게')}${B('italic', '기울임')}${B('underline', '밑줄')}${B('strike', '취소선')}${B('outline', '외곽선')}${B('hl', '텍스트 배경색')}${B('pt', '포인트색 글자')}
       </div>
       <div class="row">
         <span class="lbl">정렬</span>
@@ -387,14 +388,16 @@ const FRAMES = [['none', '없음', ''], ['solid', '실선', 'border:1px solid'],
 const SPECIAL = [['dogtag', '◉▭', '군번줄'], ['wongoji', '▦', '원고지'], ['notebook', '⁘▭', '수첩'], ['lace', '⌒⌒', '레이스'], ['lace2', '⟋⟋', '사선 레이스'],
   ['messenger', '💬', '메신저'], ['bubble', '◖ ◗', '말풍선'], ['bubble2', '☺◖', '말풍선|(캐릭터)'], ['burst', '✸', '강조 말풍선'],
   ['music', '▶❚❚', '뮤직'], ['music2', '♫ ━', '뮤직|(가사)'], ['omamori', '⛩', '오마모리'], ['virus', '▣↗', '믿어주세요...'],
-  ['search', '( ⌕)', '검색창'], ['chalk', '▬▭', '칠판'], ['sms', '▯✉', '문자'], ['dialog', '▭☒', '확인창']];
+  ['search', '( ⌕)', '검색창'], ['chalk', '▬▭', '칠판'], ['sms', '▯✉', '문자'], ['dialog', '▭☒', '확인창'],
+  ['memo', '✿┆', '메모'], ['torn', '⋚▭⋛', '찢은 테이프'],
+  ['wanted', '$▣', '수배지'], ['sparkle', '—✦', '반짝 라인'], ['tv', '▣▔', 'TV']];
 const SPECIAL_PER_PAGE = 8;
 const VIRUS_TEXT = { ko: '절대\n바이러스\n아닙니다.\n믿어\n주세요... 전\n돌고래입니\n다', en: 'Totally not a\nvirus.Trust\nme...im a\ndolphin' };
 const SPECIAL_DEFAULT_TEXT = {
   music: '노래 제목\n아티스트', messenger: '자도 자도\n계속 자고 싶어요…', dogtag: 'NAME : 콩이\nID : 0412-HWY',
   wongoji: '오늘의 일기', bubble: '소녀가 되…', bubble2: '자도 자도\n계속 자고 싶어요…', omamori: '행운가득', notebook: '내일 일은 난 몰라',
   lace: '오늘의 기록', virus: VIRUS_TEXT.ko, burst: '이겨낸다!!',
-  lace2: '오늘의 기록', music2: '노래 제목\n아티스트\n세상 속에서 우리들도\n만남인 걸', search: '좋은 감자 만나는 법', chalk: '오늘의 할 일', sms: '좋은\n감자만나..', dialog: 'Do you want\nto be mine?',
+  lace2: '오늘의 기록', music2: '노래 제목\n아티스트\n세상 속에서 우리들도\n만남인 걸', search: '좋은 감자 만나는 법', chalk: '오늘의 할 일', sms: '좋은\n감자만나..', dialog: 'Do you want\nto be mine?', memo: 'Reminder:\nYou are enough.', torn: '오늘도 수고했어 ♡', wanted: '콩이', sparkle: 'クール', tv: '▸ 1 PLAYER\n2 PLAYERS',
 };
 // 특수 프레임 때문에 테이프 폭을 키웠으면 일반 프레임으로 돌아갈 때 원래 폭으로
 const leaveSpecial = l => l.tapePrev != null ? { frame: 'none', tapeMm: l.tapePrev, tapePrev: null } : { frame: 'none' };
@@ -441,10 +444,10 @@ function FrameSec({ s }) {
   const pickOther = v => setLabel(l => {
     if (l.frame === v) return leaveSpecial(l);
     const patch = { frame: v, orientation: CAN_VERTICAL[v] && l.orientation === 'v' ? 'v' : 'h' };
-    const minTape = { music: 24, dogtag: 18, bubble2: 18, bubble: 12, omamori: 12, virus: 24, burst: 12, lace: 12, lace2: 12, music2: 24, sms: 24, chalk: 12, dialog: 18 }[v];
+    const minTape = { music: 24, dogtag: 18, bubble2: 18, bubble: 12, omamori: 12, virus: 24, burst: 12, lace: 12, lace2: 12, music2: 24, sms: 24, chalk: 12, dialog: 18, wanted: 24, tv: 18 }[v];
     if (minTape && l.tapeMm < minTape) { patch.tapeMm = minTape; patch.tapePrev = l.tapePrev ?? l.tapeMm; }
     // 기존 일반 라벨 텍스트면 프레임에 맞는 예시로 채움
-    if (!SPECIAL_DEFAULT_TEXT[l.frame] && (v === 'music' || v === 'music2' || v === 'messenger' || v === 'dogtag' || v === 'sms' || v === 'dialog') && !l.text.includes('\n')) patch.text = SPECIAL_DEFAULT_TEXT[v];
+    if (!SPECIAL_DEFAULT_TEXT[l.frame] && (v === 'music' || v === 'music2' || v === 'messenger' || v === 'dogtag' || v === 'sms' || v === 'dialog' || v === 'tv') && !l.text.includes('\n')) patch.text = SPECIAL_DEFAULT_TEXT[v];
     if (!l.text.trim()) patch.text = SPECIAL_DEFAULT_TEXT[v];
     if (patch.text) { patch.marks = {}; patch.lineSizes = []; }
     return patch;
@@ -493,7 +496,7 @@ function FrameSec({ s }) {
             <div class="muted">캐릭터는 DECO의 CHAR</div>` : null}
           ${L.frame === 'bubble' || L.frame === 'bubble2' ? html`
             <div class="row"><label class="check"><input type="checkbox" checked=${!!bub.fill} onChange=${e => setBub({ fill: e.target.checked })} /> 안쪽 채우기 (잉크색)</label></div>
-            ${bub.fill ? html`<div class="muted">글자색은 COLOR의 반전색</div>` : null}` : null}
+            ${bub.fill ? html`<div class="muted">글자색은 COLOR의 포인트색</div>` : null}` : null}
         </div>` : null}
       ${L.frame === 'omamori' ? html`
         <div class="opt-box">
@@ -509,14 +512,21 @@ function FrameSec({ s }) {
             <button class="btn" onClick=${() => setText(VIRUS_TEXT.ko)}>한국어</button>
             <button class="btn" onClick=${() => setText(VIRUS_TEXT.en)}>English</button>
           </div>
-          <div class="muted">그림은 DECO의 ICON · 이름 칸 색은 잉크 + COLOR의 반전색</div>
+          <div class="muted">그림은 DECO의 ICON · 이름 칸 색은 잉크 + COLOR의 포인트색</div>
+        </div>` : null}
+      ${L.frame === 'wanted' ? html`
+        <div class="opt-box">
+          <div class="row"><span class="lbl">현상금 $</span>
+            <input class="num" style="width:110px" value=${L.wanted?.reward ?? '1,000,000'} onInput=${e => setLabel({ wanted: { ...(L.wanted || {}), reward: e.target.value } })} />
+          </div>
+          <div class="muted">그림은 DECO의 PHOTO 자리</div>
         </div>` : null}
       ${L.frame === 'sms' ? html`
         <div class="opt-box">
           <div class="row"><span class="lbl">시간</span>
             <input class="num" value=${L.sms?.time ?? '12:34'} onInput=${e => setLabel({ sms: { ...(L.sms || {}), time: e.target.value } })} />
           </div>
-          <div class="row"><label class="check"><input type="checkbox" checked=${!!L.sms?.fill} onChange=${e => setLabel({ sms: { ...(L.sms || {}), fill: e.target.checked } })} /> 화면을 반전색으로 채우기</label></div>
+          <div class="row"><label class="check"><input type="checkbox" checked=${!!L.sms?.fill} onChange=${e => setLabel({ sms: { ...(L.sms || {}), fill: e.target.checked } })} /> 화면을 포인트색으로 채우기</label></div>
         </div>` : null}
       ${L.frame === 'dialog' ? html`
         <div class="opt-box">
@@ -527,7 +537,7 @@ function FrameSec({ s }) {
           <div class="row"><label class="check"><input type="checkbox" checked=${L.dialog?.cursor !== false} onChange=${e => setLabel({ dialog: { ...(L.dialog || {}), cursor: e.target.checked } })} /> 마우스 커서</label></div>
           <div class="muted">버튼 칸을 비우면 그 버튼은 숨겨요</div>
         </div>` : null}
-      ${L.frame === 'burst' ? html`<div class="opt-box"><div class="muted">색은 잉크 + COLOR의 반전색</div></div>` : null}
+      ${L.frame === 'burst' ? html`<div class="opt-box"><div class="muted">색은 잉크 + COLOR의 포인트색</div></div>` : null}
       ${L.frame === 'messenger' ? html`
         <div class="opt-box">
           <div class="row"><span class="lbl">첫 말풍선</span>
@@ -612,22 +622,24 @@ function customThumb(ic) {
   return u;
 }
 
+const TXT_GROUP = '직접 입력';
+const DECO_TXT = ['♡', '♥', '✿', '☆', '⋆｡˚', '♪', '･ﾟ✧', '~', '- - -', '✂ - -', '⊹', '◡'];
 function DecoSec({ s }) {
   const L = s.label;
   const hero = L.hero || { icon: null, textPos: 'bottom', size: 0.62 };
   const vert = L.orientation === 'v';
   // 특수 프레임: 가장자리 장식은 안 쓰고, 일부는 가운데 칸을 커버/캐릭터/부적으로 씀
-  const HERO_SLOT = { music: ['COVER', '앨범 커버'], bubble2: ['CHAR', '캐릭터'], omamori: ['CHARM', '아래 장식'], virus: ['ICON', '아이콘 그림'] };
+  const HERO_SLOT = { music: ['COVER', '앨범 커버'], bubble2: ['CHAR', '캐릭터'], omamori: ['CHARM', '아래 장식'], virus: ['ICON', '아이콘 그림'], memo: ['ICON', '왼쪽 그림'], wanted: ['PHOTO', '수배 그림'] };
   const special = isSpecialFrame(L.frame);
   const heroSlot = HERO_SLOT[L.frame];
   const music = special; // (이름 유지) 특수 프레임이면 가장자리 장식 비활성
   const noHero = (special && !heroSlot) || (!special && vert);
   const slot = special ? 'hero' : (vert && s.ui.decoSlot === 'hero' ? 'left' : s.ui.decoSlot);
   const names = { top: '위', bottom: '아래', left: '왼쪽', right: '오른쪽', hero: heroSlot ? heroSlot[1] : '메인 그림' };
-  const groups = { ...ICON_GROUPS, ...(s.customIcons.length ? { '내 이미지': s.customIcons.map(i => i.id) } : {}) };
+  const groups = { ...ICON_GROUPS, ...(s.customIcons.length ? { '내 이미지': s.customIcons.map(i => i.id) } : {}), [TXT_GROUP]: [] };
   // 방향 버튼을 누르면 그 자리에 들어 있는 아이콘의 탭을 바로 열어줌
   const goSlot = (k, icon) => {
-    const g = icon && Object.keys(groups).find(n => groups[n].includes(icon));
+    const g = icon && (isTxtDeco(icon) ? TXT_GROUP : Object.keys(groups).find(n => groups[n].includes(icon)));
     setUi(g ? { decoSlot: k, iconGroup: g } : { decoSlot: k });
   };
   const D = (k, ch) => html`<button class=${(L.deco[k] ? 'has' : '') + (slot === k ? ' cur' : '')} disabled=${music} onClick=${() => goSlot(k, L.deco[k])} title=${names[k]}>${ch}</button>`;
@@ -686,7 +698,13 @@ function DecoSec({ s }) {
         </select>
         ${group === '내 이미지' && cur && cur.startsWith('img_') ? html`<button class="btn" onClick=${delCustom}>✕ 선택 이미지 삭제</button>` : null}
       </div>
-      ${group === '내 이미지' ? html`
+      ${group === TXT_GROUP ? (slot === 'hero' ? html`<div class="muted" style="font-size:10px">글자 장식은 위·아래·왼쪽·오른쪽 자리에만 넣을 수 있어요</div>` : html`
+        <div class="row"><input class="txt" placeholder="장식 글자 (예: ♡ ⋆ ˚｡)" value=${isTxtDeco(cur) ? cur.slice(4) : ''}
+          onInput=${e => setLabel(l => ({ deco: { ...l.deco, [slot]: e.target.value ? 'txt:' + e.target.value : null } }))} /></div>
+        <div class="row" style="flex-wrap:wrap;gap:3px">
+          ${DECO_TXT.map(t => html`<button class="btn" onClick=${() => setLabel(l => ({ deco: { ...l.deco, [slot]: 'txt:' + t } }))}>${t}</button>`)}
+        </div>
+        <div class="muted" style="font-size:10px">${sideName} 반복을 켜면 프레임처럼 이어져요</div>`) : group === '내 이미지' ? html`
         <div class="lib big">
           ${s.customIcons.map(ic => html`<button class=${cur === ic.id ? 'on' : ''} title=${ic.name} onClick=${() => pick(ic.id)}><img src=${customThumb(ic)} alt=${ic.name} /></button>`)}
         </div>` : html`
@@ -1044,20 +1062,22 @@ function PaletteSec({ s }) {
     store.set(st => ({ ...st, palettePresets: st.palettePresets.filter(p => p.id !== st.palettePresetId), palettePresetId: 'custom', palette: [...(st.customPalette || st.palette)] }));
   };
   const L = s.label;
-  const target = s.ui.colorTarget || 'tapeColor';
+  const target0 = s.ui.colorTarget || 'tapeColor';
+  const target = target0 === 'laceColor' ? 'tapeColor' : target0;
+  const cval = k => L[k] || '#FFFFFF';
   const editing = !!s.ui.paletteEdit;
   const same = (a, b) => (a || '').toLowerCase() === (b || '').toLowerCase();
   const T = (k, t) => html`<button class=${'tgt' + (target === k ? ' on' : '')} onClick=${() => setUi({ colorTarget: k })}>
-      <span class="mini" style=${'background:' + (L[k] || '#FFFFFF')}></span>${t}</button>`;
+      <span class="mini" style=${'background:' + cval(k)}></span>${t}</button>`;
   return html`
     <div class="sec">
       <div class="h">Color <i>테이프 · 잉크 · 팔레트</i></div>
       <div class="body">
-        <div class="row tgts">${T('tapeColor', '테이프')}${T('inkColor', '잉크')}${T('invColor', '반전')}</div>
+        <div class="row tgts">${T('tapeColor', '테이프')}${T('inkColor', '잉크')}${T('invColor', '포인트')}</div>
         <div class="row"><span class="pal">
           ${s.palette.map((c, i) => editing
             ? html`<label class="sw edit" style=${'background:' + c} title=${c + ' 바꾸기'}><input type="color" value=${c} onInput=${e => setColor(i, e.target.value)} /></label>`
-            : html`<button class=${'sw' + (same(L[target], c) ? ' on' : '')} style=${'background:' + c} title=${c} onClick=${() => setLabel({ [target]: c })}></button>`)}
+            : html`<button class=${'sw' + (same(cval(target), c) ? ' on' : '')} style=${'background:' + c} title=${c} onClick=${() => setLabel({ [target]: c })}></button>`)}
           <button class=${'btn sq' + (editing ? ' on' : '')} title="팔레트 색 편집" onClick=${() => setUi({ paletteEdit: !editing })}>✎</button>
         </span></div>
         <div class="row">

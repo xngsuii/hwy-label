@@ -75,7 +75,7 @@ export function defaultLabel() {
     hero: { icon: null, textPos: 'bottom', size: 0.62 }, // 메인 그림
     tapeColor: '#F6EBA6',
     inkColor: '#2F2C30',
-    invColor: '#FFFFFF',   // 반전 글씨 (배경색·채운 말풍선 위 글자)
+    invColor: '#FFFFFF',   // 포인트색 (포인트 지정 글자·배경색·채운 말풍선 위 글자)
     emojiMono: true,
   };
 }

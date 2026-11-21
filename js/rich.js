@@ -2,7 +2,7 @@
 // marks: { bold: [[s,e],...], ... }  — L.text 의 문자 오프셋(코드 유닛) 범위 [s, e)
 // L.bold 같은 전역 플래그가 켜져 있으면 전체에 적용
 
-export const MARKS = ['bold', 'italic', 'underline', 'strike', 'outline', 'hl'];
+export const MARKS = ['bold', 'italic', 'underline', 'strike', 'outline', 'hl', 'pt']; // pt = 포인트색 글자
 export const LINE_SIZES = [['s', '작게'], ['m', '중간'], ['l', '크게']];
 const LINE_K = { l: 1, m: 0.78, s: 0.6 };
 export const lineK = (L, i) => LINE_K[L.lineSizes?.[i]] || 1;
