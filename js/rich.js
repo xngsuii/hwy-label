@@ -3,8 +3,8 @@
 // L.bold 같은 전역 플래그가 켜져 있으면 전체에 적용
 
 export const MARKS = ['bold', 'italic', 'underline', 'strike', 'outline', 'hl', 'pt']; // pt = 포인트색 글자
-export const LINE_SIZES = [['s', '작게'], ['m', '중간'], ['l', '크게']];
-const LINE_K = { l: 1, m: 0.78, s: 0.6 };
+export const LINE_SIZES = [['xs', '아주 작게'], ['s', '작게'], ['m', '중간'], ['l', '크게'], ['xl', '아주 크게']];
+const LINE_K = { xl: 1.3, l: 1, m: 0.78, s: 0.6, xs: 0.42 };
 export const lineK = (L, i) => LINE_K[L.lineSizes?.[i]] || 1;
 
 const seg = typeof Intl !== 'undefined' && Intl.Segmenter ? new Intl.Segmenter('ko', { granularity: 'grapheme' }) : null;

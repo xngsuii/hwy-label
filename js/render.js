@@ -47,9 +47,9 @@ function getImg(src) {
   return im.complete && im.naturalWidth ? im : null;
 }
 
-function frameSpace(frame) {
+function frameSpace(frame, k = 1) { // k: 테두리 두께 배율
   if (frame === 'none') return 0;
-  return FRAME_INSET + (frame === 'double' ? FRAME_LW * 3.5 : FRAME_LW) + 0.3;
+  return FRAME_INSET + (frame === 'double' ? FRAME_LW * k * 3.5 : FRAME_LW * k) + 0.3;
 }
 
 // ---------- 레이아웃 ----------
@@ -84,7 +84,7 @@ export function layoutLabel(L, family) {
   else if (L.orientation === 'free') { crossSize = L.freeH; flowSize = L.freeW; }
   else { crossSize = L.tapeMm; if (L.lengthMode === 'fixed') flowSize = L.lengthMm; }
 
-  const fs0 = frameSpace(L.frame);
+  const fs0 = frameSpace(L.frame, L.frameW || 1);
   const padF = vert ? L.padY : L.padX;
   const padC = vert ? L.padX : L.padY;
   const deco = L.deco || {};
@@ -208,7 +208,7 @@ export function renderLabel(L, family, pxPerMm = 10) {
   ctx.fillStyle = L.tapeColor;
   ctx.fillRect(0, 0, W, H);
   drawPattern(ctx, L.pattern, W, H, P, ink, Y.vert);
-  drawFrame(ctx, L.frame, W, H, P, ink);
+  drawFrame(ctx, L.frame, W, H, P, ink, L.frameW || 1);
 
   // 좌표 변환 헬퍼 (flow, cross) mm → (x, y) px
   const xy = (f, c) => Y.vert ? [(Y.crossSize - c) * P, f * P] : [f * P, c * P];
@@ -378,9 +378,9 @@ function glyph(ctx, g, x, y, align, ws, st, ink, hollow, fsPx) {
   ctx.restore();
 }
 
-function drawFrame(ctx, type, W, H, P, ink) {
+function drawFrame(ctx, type, W, H, P, ink, k = 1) {
   if (type === 'none') return;
-  const lw = Math.max(1, Math.round(FRAME_LW * P));
+  const lw = Math.max(1, Math.round(FRAME_LW * k * P));
   const ins = FRAME_INSET * P;
   ctx.strokeStyle = ink;
   ctx.lineWidth = lw;
@@ -1844,5 +1844,219 @@ const TV = {
   },
 };
 
-const SPECIAL = { music: MUSIC, messenger: MESSENGER, dogtag: DOGTAG, wongoji: WONGOJI, bubble: BUBBLE, bubble2: BUBBLE2, omamori: OMAMORI, notebook: NOTEBOOK, lace: LACE, virus: VIRUS, burst: BURST, music2: MUSIC2, lace2: LACE2, search: SEARCH, chalk: CHALK, sms: SMS, dialog: DIALOG, memo: MEMO, torn: TORN, wanted: WANTED, sparkle: SPARKLE, tv: TV };
+// ---------- 하프톤 별 (왼쪽 아래에 점으로 된 속 빈 별이 연하게 깔림) ----------
+function starPts(cx, cy, r, deg, k = 0.47) {
+  const pts = [], a0 = -Math.PI / 2 + deg * Math.PI / 180;
+  for (let i = 0; i < 10; i++) {
+    const a = a0 + i * Math.PI / 5, rr = i % 2 ? r * k : r;
+    pts.push([cx + Math.cos(a) * rr, cy + Math.sin(a) * rr]);
+  }
+  return pts;
+}
+function isDark(hex) {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i.exec(hex || '');
+  if (!m) return false;
+  const [r, g, b] = m.slice(1).map(h => parseInt(h, 16) / 255);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.45;
+}
+function inPoly(x, y, pts) {
+  let c = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const [xi, yi] = pts[i], [xj, yj] = pts[j];
+    if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c;
+  }
+  return c;
+}
+const simpleText = (L, family, T, padY, px, minW) => {
+  const lines = linesOf(L), n = Math.max(1, lines.length), lead = Math.max(1, L.leading);
+  const fs = autoFs(L, Math.min((T - 2 * padY) / (n * lead), T * 0.3));
+  const tw = maxLineW(L, family, lines, fs);
+  const H = Math.max(T, n * fs * lead + 2 * padY);
+  const W = L.lengthMode === 'fixed' ? L.lengthMm : Math.max(minW, tw + 2 * px);
+  return { lines, n, lead, fs, H, W };
+};
+const drawSimpleText = (ctx, L, family, Y, x0, w) => {
+  const { lines, n, lead, fs, hMm: H } = Y;
+  ctx.fillStyle = L.inkColor;
+  const [tx, al] = alignedX(L, x0, w);
+  const y0 = (H - n * fs * lead) / 2 + fs * lead / 2;
+  lines.forEach((l, i) => txt(ctx, L, family, l, tx, y0 + i * fs * lead, fs, al, w));
+};
+const HALFTONE = {
+  layout(L, family) {
+    const T = L.tapeMm, px = T * 0.3;
+    const t = simpleText(L, family, T, T * 0.2, px, T * 2);
+    return { special: 'halftone', wMm: t.W, hMm: t.H, ...t, px, T };
+  },
+  draw(ctx, L, family, Y, P) {
+    const { wMm: W, hMm: H, px, T } = Y;
+    // 별 배치: [x, y, 반지름, 회전°, 속 빈 정도(0 = 꽉 채움)]
+    // 왼쪽 아래 꽉 찬 별 · 살짝 맞물린 속 빈 큰 별 두 개 · 작은 별 · 오른쪽 위 별 두 개
+    const stars = [
+      [H * 0.2, H * 0.86, H * 0.24, -10, 0],
+      [H * 0.4, H * 0.37, H * 0.25, -14, 0.6],
+      [H * 0.74, H * 0.74, H * 0.36, 10, 0.64],
+      [H * 0.74, H * 0.36, H * 0.08, 6, 0],
+      [W - H * 0.28, H * 0.12, H * 0.21, -8, 0],
+      [W - H * 0.12, H * 0.43, H * 0.09, 0, 0.62],
+    ].map(([x, y, r, a, k]) => ({ o: starPts(x, y, r, a), i: k ? starPts(x, y, r * k, a) : null }));
+    const d = T * 0.032, dr = d * 0.34;
+    ctx.save();
+    // 테이프가 어두우면 흰 점, 밝으면 잉크색 점 (어느 쪽이든 연하게)
+    ctx.globalAlpha = isDark(L.tapeColor) ? 0.32 : 0.28; ctx.fillStyle = isDark(L.tapeColor) ? '#ffffff' : L.inkColor;
+    ctx.beginPath();
+    for (let y = d / 2; y < H; y += d) for (let x = d / 2; x < W; x += d) {
+      if (stars.some(s => inPoly(x, y, s.o) && !(s.i && inPoly(x, y, s.i)))) { ctx.moveTo(x + dr, y); ctx.arc(x, y, dr, 0, Math.PI * 2); }
+    }
+    ctx.fill();
+    ctx.restore();
+    drawSimpleText(ctx, L, family, Y, px, W - 2 * px);
+  },
+};
+
+// ---------- 날개 (양옆에 위로 뻗은 날개 + 반짝이·하트) ----------
+// 날개 (레퍼런스 모양): 위로 크게 부푼 윗날개 + 아래 둥근 깃털 두 개 + 안쪽 말린 선
+// 왼쪽 날개 기준 상자 (0,0)-(1,1), 오른쪽은 좌우 반전
+function drawWing(ctx, x, y, w, h, flip) {
+  const X = u => flip ? x + w - u * w : x + u * w, Y = v => y + v * h;
+  const C = (a, b, c, d, e, f) => ctx.bezierCurveTo(X(a), Y(b), X(c), Y(d), X(e), Y(f));
+  ctx.beginPath();
+  ctx.moveTo(X(0.3), Y(0.58));            // 윗날개와 아래 깃털 사이 오목한 곳
+  C(0.12, 0.53, 0.04, 0.44, 0.05, 0.3);   // 윗날개 바깥
+  C(0.06, 0.1, 0.22, 0.0, 0.42, 0.0);     // 꼭대기
+  C(0.7, 0.0, 0.95, 0.36, 0.97, 0.66);    // 안쪽(글자 쪽) 가장자리
+  C(0.99, 0.88, 0.88, 1.0, 0.73, 1.0);    // 아래 큰 깃털
+  C(0.6, 1.0, 0.52, 0.93, 0.5, 0.82);
+  C(0.4, 0.88, 0.26, 0.89, 0.24, 0.74);   // 아래 작은 깃털
+  C(0.23, 0.66, 0.26, 0.6, 0.3, 0.58);
+  ctx.stroke();
+  // 안쪽 말린 선
+  ctx.beginPath();
+  ctx.moveTo(X(0.74), Y(0.76));
+  C(0.62, 0.75, 0.58, 0.64, 0.6, 0.56);
+  C(0.62, 0.46, 0.74, 0.42, 0.84, 0.47);
+  ctx.stroke();
+}
+const WINGS = {
+  layout(L, family) {
+    const T = L.tapeMm, wh = T * 0.72, ww = wh * 1.1, px = ww + T * 0.12;
+    const t = simpleText(L, family, T, T * 0.22, px, T * 2.2);
+    return { special: 'wings', wMm: t.W, hMm: t.H, ...t, ww, wh, px, T };
+  },
+  draw(ctx, L, family, Y, P) {
+    const { wMm: W, hMm: H, ww, wh, px, T } = Y;
+    const ink = L.inkColor, lw = Math.max(1 / P, T * 0.016);
+    ctx.strokeStyle = ink; ctx.fillStyle = ink; ctx.lineWidth = lw; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    const wy = (H - wh) / 2 + T * 0.02;
+    ctx.lineWidth = Math.max(1 / P, T * 0.028);
+    [[T * 0.05, false], [W - T * 0.05 - ww, true]].forEach(([wx, flip]) => drawWing(ctx, wx, wy, ww, wh, flip));
+    ctx.lineWidth = lw;
+    ctx.fillStyle = ink;
+    // 반짝이(+) · 하트
+    const plus = (x, y, r) => { ctx.beginPath(); ctx.moveTo(x - r, y); ctx.lineTo(x + r, y); ctx.moveTo(x, y - r); ctx.lineTo(x, y + r); ctx.stroke(); };
+    const heart = (x, y, s) => { const p = new Path2D(); heartPath(p, x, y, s); ctx.stroke(p); };
+    ctx.lineWidth = lw * 0.8;
+    const sp = T * 0.06;
+    // 글자 위아래 여백과 날개 사이에만 (글자와 안 겹치게)
+    plus(px + T * 0.02, H * 0.13, sp); plus(W - px - T * 0.1, H * 0.11, sp * 0.8);
+    plus(px + T * 0.2, H * 0.89, sp * 0.8); plus(W - px + T * 0.02, H * 0.88, sp);
+    heart(W / 2 + T * 0.12, H * 0.11, T * 0.09); heart(px - T * 0.02, H * 0.9, T * 0.1);
+    heart(W - px - T * 0.22, H * 0.9, T * 0.08); heart(W - px + T * 0.04, H * 0.12, T * 0.08);
+    ctx.lineCap = 'butt';
+    drawSimpleText(ctx, L, family, Y, px, W - 2 * px);
+  },
+};
+
+// ---------- 마트 스티커 (상품명 / 칸 머리글 / 바코드 · 재활용 · 가격 / 마트 이름 띠) ----------
+const EAN_L = ['0001101', '0011001', '0010011', '0111101', '0100011', '0110001', '0101111', '0111011', '0110111', '0001011'];
+function barcodeBits(code) { // 숫자로 EAN 비슷한 막대 무늬 (왼쪽 L / 오른쪽 R 코드)
+  const d = (code.replace(/\D/g, '') || '0').split('').map(Number);
+  const half = Math.ceil(d.length / 2);
+  let bits = '101';
+  d.forEach((n, i) => {
+    if (i === half) bits += '01010';
+    const l = EAN_L[n];
+    bits += i < half ? l : l.replace(/./g, c => c === '1' ? '0' : '1');
+  });
+  return bits + '101';
+}
+const MART_HEAD = ['포장 년월일', '유효 년월일', '100g당(원)', '중량(g)'];
+const MART = {
+  layout(L, family) {
+    const lines = linesOf(L), n = Math.max(1, lines.length), lead = Math.max(1, L.leading);
+    const T = L.tapeMm, u = T, o = u * 0.04;
+    const titleH = u * 0.27;
+    const fs = autoFs(L, Math.min(titleH / (n * lead), u * 0.19));
+    const tw = maxLineW(L, family, lines, fs);
+    // 세로 배치 (u = 테이프 폭 기준): 상품명 · 머리글 줄 · 넉넉한 여백 · 바코드/가격 · 마트 띠
+    const hy0 = o + u * 0.32, hy1 = hy0 + u * 0.1, barTop = hy1 + u * 0.24, barH = u * 0.24;
+    const bandH = u * 0.2, by = barTop + barH + u * 0.12, H = by + bandH + o;
+    const W = L.lengthMode === 'fixed' ? L.lengthMm : Math.max(u * 2.4, tw + u * 0.4);
+    return { special: 'mart', wMm: W, hMm: H, lines, n, lead, fs, o, titleH, hy0, hy1, barTop, barH, bandH, by, T };
+  },
+  draw(ctx, L, family, Y, P) {
+    const { wMm: W, hMm: H, lines, n, lead, fs, o, titleH, hy0, hy1, barTop, barH, bandH, by, T: u } = Y;
+    const ink = L.inkColor, bg = L.tapeColor, lw = Math.max(1 / P, u * 0.012);
+    const m = L.mart || {};
+    const name = m.name ?? '라벨마트', code = m.code ?? '8 801234 567890', price = m.price ?? '9,170';
+    ctx.strokeStyle = ink; ctx.fillStyle = ink; ctx.lineWidth = lw;
+    const r = u * 0.06, x0 = o, x1 = W - o, y0 = o, y1 = H - o;
+    // 아래 띠 (잉크색) + 마트 이름 (배경색 글씨)
+    ctx.save();
+    rrect(ctx, x0, y0, x1 - x0, y1 - y0, r); ctx.clip();
+    ctx.fillRect(x0, by, x1 - x0, bandH);
+    ctx.restore();
+    rrect(ctx, x0, y0, x1 - x0, y1 - y0, r); ctx.stroke();
+    ctx.fillStyle = bg; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const nf = Math.min(u * 0.12, (x1 - x0 - u * 0.2) / Math.max(0.1, textW(boldStr(L, family, 100), name, 100) / 100));
+    ctx.font = boldStr(L, family, nf); ctx.fillText(name, W / 2, by + bandH / 2);
+    // 상품명 (텍스트 박스)
+    ctx.fillStyle = ink;
+    const ty0 = y0 + u * 0.03 + (titleH - n * fs * lead) / 2 + fs * lead / 2;
+    const [tx, al] = alignedX(L, x0 + u * 0.1, x1 - x0 - u * 0.2);
+    lines.forEach((l, i) => txt(ctx, L, family, l, tx, ty0 + i * fs * lead, fs, al, x1 - x0 - u * 0.2));
+    // 칸 머리글
+    const iw = x1 - x0;
+    ctx.lineWidth = lw * 0.8;
+    ctx.beginPath(); ctx.moveTo(x0, hy0); ctx.lineTo(x1, hy0); ctx.moveTo(x0, hy1); ctx.lineTo(x1, hy1); ctx.stroke();
+    const parts = [0.27, 0.27, 0.24, 0.22], hf = u * 0.05;
+    ctx.font = boldStr(L, family, hf, 400);
+    let hx = x0;
+    parts.forEach((p, i) => {
+      const cw = iw * p;
+      ctx.fillText(MART_HEAD[i], hx + cw / 2, (hy0 + hy1) / 2, cw * 0.9);
+      if (i < parts.length - 1) { ctx.beginPath(); ctx.moveTo(hx + cw, hy0); ctx.lineTo(hx + cw, hy1 + u * 0.05); ctx.stroke(); }
+      hx += cw;
+    });
+    // 바코드 + 번호
+    const bits = barcodeBits(code), bx = x0 + u * 0.08, bw = Math.min(iw * 0.42, u * 0.95), mod = bw / bits.length;
+    for (let i = 0; i < bits.length; i++) if (bits[i] === '1') ctx.fillRect(bx + i * mod, barTop, mod + 0.001, barH);
+    ctx.font = boldStr(L, family, u * 0.055, 400); ctx.textAlign = 'center';
+    ctx.fillText(code, bx + bits.length * mod / 2, barTop + barH + u * 0.045, bw);
+    // 재활용 표시 (세모 화살표 + OTHER)
+    const rx = x0 + iw * 0.62, ry = barTop + barH * 0.4, rs = u * 0.075;
+    ctx.lineWidth = lw * 0.9; ctx.lineJoin = 'round';
+    for (let k = 0; k < 3; k++) {
+      const a0 = -Math.PI / 2 + k * Math.PI * 2 / 3, a1 = a0 + Math.PI * 2 / 3;
+      const p0 = [rx + Math.cos(a0) * rs, ry + Math.sin(a0) * rs], p1 = [rx + Math.cos(a1) * rs, ry + Math.sin(a1) * rs];
+      const e = [p0[0] + (p1[0] - p0[0]) * 0.72, p0[1] + (p1[1] - p0[1]) * 0.72];
+      const s0 = [p0[0] + (p1[0] - p0[0]) * 0.18, p0[1] + (p1[1] - p0[1]) * 0.18];
+      ctx.beginPath(); ctx.moveTo(...s0); ctx.lineTo(...e); ctx.stroke();
+      const ang = Math.atan2(p1[1] - p0[1], p1[0] - p0[0]), ah = rs * 0.35;
+      ctx.beginPath(); ctx.moveTo(e[0] + Math.cos(ang) * ah * 0.6, e[1] + Math.sin(ang) * ah * 0.6);
+      ctx.lineTo(e[0] + Math.cos(ang + 2.4) * ah, e[1] + Math.sin(ang + 2.4) * ah);
+      ctx.lineTo(e[0] + Math.cos(ang - 2.4) * ah, e[1] + Math.sin(ang - 2.4) * ah); ctx.closePath(); ctx.fill();
+    }
+    ctx.font = boldStr(L, family, u * 0.045, 400); ctx.textAlign = 'center';
+    ctx.fillText('OTHER', rx, ry + rs * 1.55);
+    // 가격
+    const px1 = x1 - u * 0.08;
+    ctx.textAlign = 'right';
+    ctx.font = boldStr(L, family, u * 0.05, 400); ctx.fillText('가격(원)', px1, barTop + u * 0.02);
+    const pf = Math.min(u * 0.14, (iw * 0.26) / Math.max(0.1, textW(boldStr(L, family, 100), price, 100) / 100));
+    ctx.font = boldStr(L, family, pf); ctx.fillText(price, px1, barTop + barH * 0.66);
+  },
+};
+
+const SPECIAL = { music: MUSIC, messenger: MESSENGER, dogtag: DOGTAG, wongoji: WONGOJI, bubble: BUBBLE, bubble2: BUBBLE2, omamori: OMAMORI, notebook: NOTEBOOK, lace: LACE, virus: VIRUS, burst: BURST, music2: MUSIC2, lace2: LACE2, search: SEARCH, chalk: CHALK, sms: SMS, dialog: DIALOG, memo: MEMO, torn: TORN, wanted: WANTED, sparkle: SPARKLE, tv: TV, halftone: HALFTONE, wings: WINGS, mart: MART };
 export const isSpecialFrame = f => !!SPECIAL[f];

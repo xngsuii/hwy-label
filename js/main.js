@@ -289,14 +289,13 @@ function TextSec({ s, taRef }) {
           onInput=${e => setLabel(l => editText(l, e.target.value))} onScroll=${e => setScroll(e.target.scrollTop)} placeholder="라벨에 넣을 글자"></textarea>
       </div>
       <div class="row" style="margin-top:10px">
-        <span class="lbl">크기</span>
-        <${Toggle} value=${L.sizeMode} onChange=${v => setLabel({ sizeMode: v })} options=${[['auto', '자동 맞춤'], ['manual', '직접']]} />
+        <span class="lbl">맞춤</span>
+        <${Toggle} value=${L.sizeMode} onChange=${v => setLabel({ sizeMode: v })} options=${[['auto', '자동'], ['manual', '직접']]} />
         ${L.sizeMode === 'manual' ? html`<input class="num" type="number" min="3" max="200" step="0.5" value=${L.sizePt} onInput=${e => setLabel({ sizePt: +e.target.value || 14 })} /><span style="font-size:10px">pt</span>` : null}
       </div>
       ${multi ? html`
-        <div class="row">
-          <span class="lbl">줄 크기</span>
-          <span class="ln-cur">${CIRC[cur] || `(${cur + 1})`}</span>
+        <div class="row ln-row">
+          <span class="lbl"><span class="ln-cur">${CIRC[cur] || `(${cur + 1})`}</span> 크기</span>
           <${Toggle} value=${L.lineSizes?.[cur] || 'l'} onChange=${v => setSize(cur, v)} options=${LINE_SIZES} />
         </div>` : null}
       <div class="row">
@@ -307,7 +306,7 @@ function TextSec({ s, taRef }) {
         <span class="lbl">정렬</span>
         ${A('left', '왼쪽 정렬')}${A('center', '가운데 정렬')}${A('right', '오른쪽 정렬')}${A('justify', '양쪽 정렬')}
       </div>
-      <div class="row" style="margin-top:10px">
+      <div class="row" style="margin-top:20px">
         <select class="pill fontsel" value=${L.fontId} style=${'font-family:' + ffam(fontById(L.fontId, custom))} onPointerDown=${loadAllFonts} onFocus=${loadAllFonts} onChange=${e => setLabel({ fontId: e.target.value })}>
           ${Object.entries(groups).map(([g, fs]) => html`<optgroup label=${g}>${fs.map(f => html`<option value=${f.id} style=${'font-family:' + ffam(f)}>${f.name}</option>`)}</optgroup>`)}
           ${custom.length ? html`<optgroup label="내 폰트">${custom.map(f => html`<option value=${f.id} style=${'font-family:' + ffam(f)}>${f.name}</option>`)}</optgroup>` : null}
@@ -406,14 +405,14 @@ const SPECIAL = [['dogtag', '◉▭', '군번줄'], ['wongoji', '▦', '원고�
   ['music', '▶❚❚', '뮤직'], ['music2', '♫ ━', '뮤직|(가사)'], ['omamori', '⛩', '오마모리'], ['virus', '▣↗', '믿어주세요...'],
   ['search', '( ⌕)', '검색창'], ['chalk', '▬▭', '칠판'], ['sms', '▯✉', '문자'], ['dialog', '▭☒', '확인창'],
   ['memo', '✿┆', '메모'],
-  ['wanted', '$▣', '수배지'], ['sparkle', '—✦', '반짝 라인'], ['tv', '📺︎', 'TV']];
+  ['wanted', '$▣', '수배지'], ['sparkle', '—✦', '반짝 라인'], ['tv', '📺︎', 'TV'], ['halftone', '☆⁘', '하프톤 별'], ['wings', '𓆩♡𓆪', '날개'], ['mart', '▥₩', '마트 스티커']];
 const SPECIAL_PER_PAGE = 8;
 const VIRUS_TEXT = { ko: '절대\n바이러스\n아닙니다.\n믿어\n주세요... 전\n돌고래입니\n다', en: 'Totally not a\nvirus.Trust\nme...im a\ndolphin' };
 const SPECIAL_DEFAULT_TEXT = {
   music: '노래 제목\n아티스트', messenger: '자도 자도\n계속 자고 싶어요…', dogtag: 'NAME : 콩이\nID : 0412-HWY',
   wongoji: '오늘의 일기', bubble: '소녀가 되…', bubble2: '자도 자도\n계속 자고 싶어요…', omamori: '행운가득', notebook: '내일 일은 난 몰라',
   lace: '오늘의 기록', virus: VIRUS_TEXT.ko, burst: '이겨낸다!!',
-  lace2: '오늘의 기록', music2: '노래 제목\n아티스트\n세상 속에서 우리들도\n만남인 걸', search: '좋은 감자 만나는 법', chalk: '오늘의 할 일', sms: '좋은\n감자만나..', dialog: 'Do you want\nto be mine?', memo: 'Reminder:\nYou are enough.', torn: '오늘도 수고했어 ♡', wanted: '콩이', sparkle: 'クール', tv: '▸ 1 PLAYER\n2 PLAYERS',
+  lace2: '오늘의 기록', music2: '노래 제목\n아티스트\n세상 속에서 우리들도\n만남인 걸', search: '좋은 감자 만나는 법', chalk: '오늘의 할 일', sms: '좋은\n감자만나..', dialog: 'Do you want\nto be mine?', memo: 'Reminder:\nYou are enough.', torn: '오늘도 수고했어 ♡', wanted: '콩이', sparkle: 'クール', halftone: '오늘도 반짝', wings: '오늘도 행복', mart: '배가~ 불러베리 [국산]', tv: '▸ 1 PLAYER\n2 PLAYERS',
 };
 // 특수 프레임 때문에 테이프 폭을 키웠으면 일반 프레임으로 돌아갈 때 원래 폭으로
 const leaveSpecial = l => l.tapePrev != null ? { frame: 'none', tapeMm: l.tapePrev, tapePrev: null } : { frame: 'none' };
@@ -460,7 +459,7 @@ function FrameSec({ s }) {
   const pickOther = v => setLabel(l => {
     if (l.frame === v) return leaveSpecial(l);
     const patch = { frame: v, orientation: CAN_VERTICAL[v] && l.orientation === 'v' ? 'v' : 'h' };
-    const minTape = { music: 24, dogtag: 18, bubble2: 18, bubble: 12, omamori: 12, virus: 24, burst: 12, lace: 12, lace2: 12, music2: 24, sms: 24, chalk: 12, dialog: 18, wanted: 24, tv: 18 }[v];
+    const minTape = { music: 24, dogtag: 18, bubble2: 18, bubble: 12, omamori: 12, virus: 24, burst: 12, lace: 12, lace2: 12, music2: 24, sms: 24, chalk: 12, dialog: 18, wanted: 24, tv: 18, mart: 18 }[v];
     if (minTape && l.tapeMm < minTape) { patch.tapeMm = minTape; patch.tapePrev = l.tapePrev ?? l.tapeMm; }
     // 기존 일반 라벨 텍스트면 프레임에 맞는 예시로 채움
     if (!SPECIAL_DEFAULT_TEXT[l.frame] && (v === 'music' || v === 'music2' || v === 'messenger' || v === 'dogtag' || v === 'sms' || v === 'dialog' || v === 'tv') && !l.text.includes('\n')) patch.text = SPECIAL_DEFAULT_TEXT[v];
@@ -477,6 +476,8 @@ function FrameSec({ s }) {
       <div class="tiles" style="margin-bottom:6px">
         ${FRAMES.map(([v, t, st]) => html`<button class=${'tile' + (L.frame === v ? ' on' : '')} onClick=${() => setLabel(l => ({ ...leaveSpecial(l), frame: v }))}><span style=${st + ';padding:2px 6px'}>${t}</span></button>`)}
       </div>
+      ${L.frame === 'solid' || L.frame === 'dotted' || L.frame === 'double' ? html`
+        <${Range} label="두께" min=${0.5} max=${4} step=${0.5} value=${L.frameW || 1} onInput=${v => setLabel({ frameW: v })} fmt=${v => '×' + v} />` : null}
       <div class="sub-h">Special</div>
       <div class="tiles">
         ${shown.map(([v, i, t]) => html`<button class=${'tile' + (L.frame === v ? ' on' : '')} title=${t.replace('|', ' ')} onClick=${() => pickSpecial(v)}>${i}${t.split('|').map(x => html`<br/>${x}`)}</button>`)}
@@ -529,6 +530,15 @@ function FrameSec({ s }) {
             <button class="btn" onClick=${() => setText(VIRUS_TEXT.en)}>English</button>
           </div>
           <div class="muted">그림은 DECO의 ICON · 이름 칸 색은 잉크 + COLOR의 포인트색</div>
+        </div>` : null}
+      ${L.frame === 'mart' ? html`
+        <div class="opt-box">
+          <div class="row"><span class="lbl">마트</span>
+            <input class="txt" value=${L.mart?.name ?? '라벨마트'} onInput=${e => setLabel({ mart: { ...(L.mart || {}), name: e.target.value } })} /></div>
+          <div class="row"><span class="lbl">바코드</span>
+            <input class="txt" value=${L.mart?.code ?? '8 801234 567890'} onInput=${e => setLabel({ mart: { ...(L.mart || {}), code: e.target.value } })} /></div>
+          <div class="row"><span class="lbl">가격(원)</span>
+            <input class="txt" value=${L.mart?.price ?? '9,170'} onInput=${e => setLabel({ mart: { ...(L.mart || {}), price: e.target.value } })} /></div>
         </div>` : null}
       ${L.frame === 'wanted' ? html`
         <div class="opt-box">
@@ -742,7 +752,7 @@ function EmojiSec({ s, taRef }) {
     requestAnimationFrame(() => { if (ta) { ta.focus(); ta.selectionStart = ta.selectionEnd = a + t.length; } });
   };
   const addFav = async () => {
-    const t = await askText('즐겨찾기에 넣을 이모티콘이나 기호', '', { title: '즐겨찾기 추가', ok: '추가' });
+    const t = await askText('내 이모지에 넣을 이모티콘이나 기호', '', { title: '내 이모지 추가', ok: '추가' });
     if (t) store.set(st => ({ ...st, kaomojiFav: [...st.kaomojiFav, t] }));
   };
   const onFav = (e, t, i) => {
@@ -779,11 +789,12 @@ function EmojiSec({ s, taRef }) {
           <div class="row"><span class="lbl">이모지</span>
             <${Toggle} value=${L.emojiMono} onChange=${v => setLabel({ emojiMono: v })} options=${[[true, '흑백 변환'], [false, '컬러 유지']]} />
           </div>
-          ${s.kaomojiFav.length ? html`<div class="sub-h">즐겨찾기 <span style="text-transform:none;letter-spacing:0">(shift+클릭 = 삭제)</span></div>
-            <div class="kao" style="margin-bottom:6px">${s.kaomojiFav.map((t, i) => html`<button onClick=${e => onFav(e, t, i)}>${t}</button>`)}</div>` : null}
+          <div class="sub-h">기본</div>
+          <div class="kao" style="margin-bottom:6px">${KAOMOJI.map(t => html`<button onClick=${() => insert(t)}>${t}</button>`)}</div>
+          <div class="sub-h">내 이모지 ${s.kaomojiFav.length ? html`<span style="text-transform:none;letter-spacing:0">(shift+클릭 = 삭제)</span>` : null}</div>
           <div class="kao">
-            ${KAOMOJI.map(t => html`<button onClick=${() => insert(t)}>${t}</button>`)}
-            <button style="border-style:dashed" onClick=${addFav}>+ 즐겨찾기</button>
+            ${s.kaomojiFav.map((t, i) => html`<button onClick=${e => onFav(e, t, i)}>${t}</button>`)}
+            <button style="border-style:dashed" onClick=${addFav}>+ 추가</button>
           </div>
         </div>
       </div>` : null}`;
