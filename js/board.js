@@ -25,21 +25,30 @@ export function labelPx(label, customFonts, scale = 1) {
   return { w: Y.wMm * k, h: Y.hMm * k };
 }
 
-export function autoLayout(labels, customFonts, board) {
-  const { w: W, h: H } = board;
-  const scale = board.scale || 1;
-  const margin = W * 0.06, gap = W * 0.03;
+// 줄 단위로 채우기 (라벨 크기 sizes는 미리 계산해서 넘김)
+function packRows(sizes, W, R = W) { // R: 여백·간격 기준 길이
+  const margin = R * 0.06, gap = R * 0.03;
   const rows = [];
   let row = { items: [], w: 0, h: 0 };
-  for (const L of labels) {
-    const s = labelPx(L, customFonts, scale * itemScale(board, L.id));
+  for (const it of sizes) {
+    const s = it.s;
     if (row.items.length && row.w + gap + s.w > W - 2 * margin) { rows.push(row); row = { items: [], w: 0, h: 0 }; }
-    row.items.push({ L, s });
+    row.items.push(it);
     row.w += (row.items.length > 1 ? gap : 0) + s.w;
     row.h = Math.max(row.h, s.h);
   }
   if (row.items.length) rows.push(row);
   const totalH = rows.reduce((a, r) => a + r.h, 0) + Math.max(0, rows.length - 1) * gap;
+  return { rows, margin, gap, totalH };
+}
+const labelSizes = (labels, customFonts, board) =>
+  labels.map(L => ({ L, s: labelPx(L, customFonts, (board.scale || 1) * itemScale(board, L.id)) }));
+
+// 자유 지정 판은 입력한 크기 기준으로 여백을 잡음 (판이 커져도 여백은 그대로)
+const marginRef = b => b.size === 'custom' ? Math.min(b.customW || b.w, b.customH || b.h) : b.w;
+export function autoLayout(labels, customFonts, board, sizes) {
+  const { w: W, h: H } = board;
+  const { rows, margin, gap, totalH } = packRows(sizes || labelSizes(labels, customFonts, board), W, marginRef(board));
   let y = Math.max(margin, (H - totalH) / 2);
   const items = [];
   for (const r of rows) {
@@ -51,6 +60,30 @@ export function autoLayout(labels, customFonts, board) {
     y += r.h + gap;
   }
   return items;
+}
+
+// 자동 배치: 자유 지정 + 자동 커짐이면 라벨이 다 들어갈 만큼 판을 키움 (입력한 크기보다 작아지진 않음)
+export const BOARD_MAX = 8000;
+export function fitAutoBoard(board, labels, customFonts) {
+  const sizes = labelSizes(labels, customFonts, board);
+  let b = board;
+  if (board.size === 'custom' && board.autoGrow) {
+    const w0 = board.customW || board.w, h0 = board.customH || board.h, dir = board.grow || 'v';
+    const R = marginRef(board);
+    const need = W => { const p = packRows(sizes, W, R); return p.totalH + 2 * p.margin; };
+    const fitsW = W => packRows(sizes, W, R).rows.every(r => r.w <= W - 2 * R * 0.06 + 0.5);
+    let w = w0, h = h0;
+    if (dir === 'v') h = Math.max(h0, Math.ceil(need(w0)));
+    else {
+      // 가로: 높이 고정, 폭만 늘림 / 비율: 둘 다 같은 배율로 늘림
+      for (let f = 1; f <= BOARD_MAX / Math.max(w0, h0) + 1e-9; f *= 1.02) {
+        w = Math.round(w0 * f); h = dir === 'ratio' ? Math.round(h0 * f) : h0;
+        if (need(w) <= h && fitsW(w)) break;
+      }
+    }
+    b = { ...board, w: Math.min(BOARD_MAX, w), h: Math.min(BOARD_MAX, h) };
+  }
+  return { ...b, items: autoLayout(labels, customFonts, b, sizes) };
 }
 
 export function scatterLayout(labels, customFonts, board) {
@@ -84,7 +117,7 @@ export function scatterLayout(labels, customFonts, board) {
 // 서랍 변경 후 판 아이템 동기화
 export function syncBoard(state) {
   const { drawer, board, customFonts } = state;
-  if (board.layout === 'auto') return { ...board, items: autoLayout(drawer, customFonts, board) };
+  if (board.layout === 'auto') return fitAutoBoard(board, drawer, customFonts);
   const ids = new Set(drawer.map(l => l.id));
   const items = board.items.filter(i => ids.has(i.id));
   const have = new Set(items.map(i => i.id));

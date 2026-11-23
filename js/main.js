@@ -3,7 +3,7 @@ import { store, setLabel, setUi, setBoard, defaultLabel, uid, TAPE_WIDTHS, expor
 import { BUILTIN_FONTS, fontById, ensureFont, registerCustomFont, loadStoredFonts, saveStoredFonts } from './fonts.js';
 import { renderLabel, layoutLabel, clearMeasureCache, canvasToBlob, isSpecialFrame, isTxtDeco } from './render.js';
 import { ICON_GROUPS, iconSvg, iconSize, setCustomIcons } from './pixel.js';
-import { BOARD_SIZES, BOARD_PPM, boardDims, autoLayout, scatterLayout, syncBoard, renderBoard } from './board.js';
+import { BOARD_SIZES, BOARD_PPM, BOARD_MAX, boardDims, fitAutoBoard, scatterLayout, syncBoard, renderBoard } from './board.js';
 import { loadImageFile, toBitmap, rowsToCanvas } from './bitmap.js';
 import { idb } from './store.js';
 import { covered, hasMarks, toggleMark, toggleAll, editText, LINE_SIZES } from './rich.js';
@@ -718,15 +718,15 @@ function DecoSec({ s }) {
           <${Toggle} value=${hero.textPos} onChange=${v => setHero({ textPos: v })} options=${[['bottom', '그림 아래'], ['top', '그림 위']]} />
         </div>
         <${Range} label="그림 크기" min=${0.3} max=${0.85} step=${0.01} value=${hero.size} onInput=${v => setHero({ size: v })} fmt=${v => Math.round(v * 100) + '%'} />` : null}
+      ${slot !== 'hero' ? html`<div class="row"><span class="lbl">글자</span><input class="txt" placeholder="직접 입력 (예: ♡ ⋆ ˚｡)" value=${isTxtDeco(cur) ? cur.slice(4) : ''}
+        onInput=${e => setLabel(l => ({ deco: { ...l.deco, [slot]: e.target.value ? 'txt:' + e.target.value : null } }))} /></div>` : null}
       <div class="row">
-        <select class="pill" value=${group} onChange=${e => setUi({ iconGroup: e.target.value })}>
+        <select class="pill" value=${group} onChange=${e => { const g = e.target.value; setUi(g === TXT_GROUP && slot === 'hero' && !music ? { iconGroup: g, decoSlot: 'left' } : { iconGroup: g }); }}>
           ${Object.keys(groups).map(g => html`<option value=${g}>${g}</option>`)}
         </select>
         ${group === '내 이미지' && cur && cur.startsWith('img_') ? html`<button class="btn" onClick=${delCustom}>✕ 선택 이미지 삭제</button>` : null}
       </div>
       ${group === TXT_GROUP ? (slot === 'hero' ? html`<div class="muted" style="font-size:10px">글자 장식은 위·아래·왼쪽·오른쪽 자리에만 넣을 수 있어요</div>` : html`
-        <div class="row"><input class="txt" placeholder="장식 글자 (예: ♡ ⋆ ˚｡)" value=${isTxtDeco(cur) ? cur.slice(4) : ''}
-          onInput=${e => setLabel(l => ({ deco: { ...l.deco, [slot]: e.target.value ? 'txt:' + e.target.value : null } }))} /></div>
         <div class="row" style="flex-wrap:wrap;gap:3px">
           ${DECO_TXT.map(t => html`<button class="btn" onClick=${() => setLabel(l => ({ deco: { ...l.deco, [slot]: 'txt:' + t } }))}>${t}</button>`)}
         </div>
@@ -889,7 +889,8 @@ function Center({ s, fv }) {
     pushBoardHist();
     store.set(st => {
       const b = { ...st.board, layout: mode === 'auto' ? 'auto' : 'free' };
-      b.items = mode === 'auto' ? autoLayout(st.drawer, st.customFonts, b) : scatterLayout(st.drawer, st.customFonts, b);
+      if (mode === 'auto') return { ...st, board: fitAutoBoard(b, st.drawer, st.customFonts) };
+      b.items = scatterLayout(st.drawer, st.customFonts, b);
       return { ...st, board: b };
     });
   };
@@ -1188,9 +1189,22 @@ function BoardSec({ s }) {
   const b = s.board;
   const fileRef = useRef();
   const setSize = (k, landscape = b.landscape) => {
-    const { w, h } = boardDims(k, landscape);
-    store.set(st => { const nb = { ...st.board, size: k, landscape, w, h, layout: 'auto' }; return { ...st, board: syncBoard({ ...st, board: nb }) }; });
+    store.set(st => {
+      const ob = st.board;
+      const { w, h } = k === 'custom' ? { w: ob.customW || ob.w, h: ob.customH || ob.h } : boardDims(k, landscape);
+      const nb = { ...ob, size: k, landscape, w, h, layout: 'auto', ...(k === 'custom' ? { customW: w, customH: h } : {}) };
+      return { ...st, board: syncBoard({ ...st, board: nb }) };
+    });
   };
+  // 자유 지정: 입력한 가로·세로(px)가 기준 크기. 자동이면 자동 배치 때 라벨에 맞춰 커짐
+  const setCustom = p => store.set(st => {
+    const nb = { ...st.board, ...p };
+    if (!nb.autoGrow || nb.layout !== 'auto') { nb.w = nb.customW; nb.h = nb.customH; }
+    return { ...st, board: syncBoard({ ...st, board: nb }) };
+  });
+  const dimIn = key => html`<input class="num" type="number" min="100" max=${BOARD_MAX} step="10" value=${b[key] || (key === 'customW' ? b.w : b.h)}
+    onChange=${e => { const v = Math.round(+e.target.value); if (v >= 100) setCustom({ [key]: Math.min(BOARD_MAX, v) }); else e.target.value = b[key]; }} />`;
+  const custom = b.size === 'custom';
   const squareBoard = BOARD_SIZES[b.size] && BOARD_SIZES[b.size][0] === BOARD_SIZES[b.size][1];
   const onImg = e => {
     const f = e.target.files[0]; e.target.value = '';
@@ -1207,9 +1221,17 @@ function BoardSec({ s }) {
         <div class="row"><span class="lbl">크기</span>
           <select class="pill" value=${b.size} onChange=${e => setSize(e.target.value)}>
             ${Object.entries(BOARD_SIZES).map(([k, v]) => html`<option value=${k}>${v[2]}</option>`)}
+            <option value="custom">자유 지정</option>
           </select>
         </div>
-        ${!squareBoard ? html`<div class="row"><span class="lbl">방향</span>
+        ${custom ? html`
+          <div class="row"><span>가로</span>${dimIn('customW')}<span>세로</span>${dimIn('customH')}<span class="muted">px</span></div>
+          <div class="row"><label class="check"><input type="checkbox" checked=${!!b.autoGrow} onChange=${e => setCustom({ autoGrow: e.target.checked })} /> 자동 (자동배치 때 라벨이 늘면 판도 커짐)</label></div>
+          ${b.autoGrow ? html`<div class="row"><span class="lbl">방향</span>
+            <${Toggle} value=${b.grow || 'v'} onChange=${v => setCustom({ grow: v })} options=${[['v', '세로'], ['h', '가로'], ['ratio', '비율 유지']]} />
+          </div>
+          ${b.w !== b.customW || b.h !== b.customH ? html`<div class="muted" style="font-size:10px">지금 판 크기 ${b.w} × ${b.h}</div>` : null}` : null}` : null}
+        ${!squareBoard && !custom ? html`<div class="row"><span class="lbl">방향</span>
           <${Toggle} value=${!!b.landscape} onChange=${v => setSize(b.size, v)} options=${[[false, '세로'], [true, '가로']]} />
         </div>` : null}
         <div class="bgs">
