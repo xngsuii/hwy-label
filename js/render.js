@@ -1915,34 +1915,44 @@ const HALFTONE = {
 };
 
 // ---------- 날개 (양옆에 위로 뻗은 날개 + 반짝이·하트) ----------
-// 날개 = ໒꒱ : 실제 글자 모양의 중심선을 따서 같은 굵기 선으로 그림 (폰트 상관없이 똑같이 나오게)
-// 오른쪽(໒꒱) 기준 상자 (0,0)-(1,1) 안의 점들 [x,y,x,y,...], 왼쪽은 이걸 좌우 반전
-const WING_A1 = [0.353,0.074,0.345,0.107,0.331,0.14,0.312,0.177,0.29,0.218,0.268,0.255,0.251,0.277,0.235,0.299,0.21,0.325,0.185,0.354,0.155,0.391,0.127,0.421,0.105,0.45,0.075,0.494,0.055,0.524,0.039,0.557,0.019,0.598,0.008,0.638,0.003,0.683,0,0.727,0.003,0.771,0.014,0.815,0.03,0.86,0.05,0.893,0.08,0.93,0.11,0.956,0.141,0.974,0.174,0.985,0.207,0.989,0.24,0.989,0.273,0.982,0.306,0.974,0.323,0.945,0.337,0.911,0.348,0.871,0.351,0.838];
-const WING_A2 = [0.724,0,0.757,0,0.79,0.004,0.823,0.015,0.851,0.022,0.884,0.037,0.909,0.055,0.939,0.085,0.959,0.107,0.975,0.148,0.986,0.188,0.992,0.229,0.986,0.273,0.978,0.317,0.961,0.358,0.945,0.384,0.914,0.417,0.881,0.439,0.848,0.454,0.821,0.472,0.785,0.48,0.752,0.48];
-const WING_B = [0.721,1,0.735,1,0.768,0.996,0.801,0.989,0.832,0.982,0.865,0.97,0.892,0.959,0.923,0.937,0.948,0.911,0.97,0.878,0.986,0.841,0.997,0.797,1,0.753,0.997,0.708,0.989,0.668,0.975,0.638,0.953,0.598,0.923,0.561,0.898,0.539,0.868,0.52,0.834,0.506,0.821,0.472,0.785,0.48,0.752,0.48];
-function drawWing(ctx, x, y, w, h, flip) {
-  const X = u => flip ? x + w - u * w : x + u * w, Y = v => y + v * h;
-  [WING_A1, WING_A2, WING_B].forEach(a => { // 점들을 부드럽게 이음 (중간점 기준 2차 곡선)
-    ctx.beginPath(); ctx.moveTo(X(a[0]), Y(a[1]));
-    for (let i = 2; i < a.length - 2; i += 2) ctx.quadraticCurveTo(X(a[i]), Y(a[i + 1]), X((a[i] + a[i + 2]) / 2), Y((a[i + 1] + a[i + 3]) / 2));
-    ctx.lineTo(X(a[a.length - 2]), Y(a[a.length - 1]));
-    ctx.stroke();
-  });
+// 날개 = 도트 그림 (오른쪽 날개 기준, 왼쪽은 좌우 반전). '#' 한 칸 = 점 하나
+const WING_DOTS = [
+  '............####.',
+  '..........##...#.',
+  '........##.....#.',
+  '......##.......#.',
+  '....##.........#.',
+  '...#...........#.',
+  '..#..........####',
+  '.#........####..#',
+  '.#..............#',
+  '#....####......#.',
+  '#...#....#..###..',
+  '#...###...#....#.',
+  '##...##...#...#..',
+  '.##.......####...',
+  '..##.....##......',
+  '....#####........',
+];
+function drawWing(ctx, x, y, w, h, flip, rows) {
+  const R = rows.length, C = rows[0].length, cell = Math.min(w / C, h / R), g = cell * 0.08;
+  rows.forEach((row, r) => { for (let c = 0; c < C; c++) if (row[c] === '#') {
+    const cx = flip ? x + w - (c + 1) * cell : x + c * cell;
+    ctx.fillRect(cx + g / 2, y + r * cell + g / 2, cell - g, cell - g);
+  } });
 }
 const WINGS = {
   layout(L, family) {
-    const T = L.tapeMm, wh = T * 0.5, ww = wh * 1.34, px = ww + T * 0.24;
+    const T = L.tapeMm, rows = WING_DOTS, wh = T * 0.56, ww = wh * rows[0].length / rows.length, px = ww + T * 0.2;
     const t = simpleText(L, family, T, T * 0.22, px, T * 2.2);
-    return { special: 'wings', wMm: t.W, hMm: t.H, ...t, ww, wh, px, T };
+    return { special: 'wings', wMm: t.W, hMm: t.H, ...t, ww, wh, px, T, rows };
   },
   draw(ctx, L, family, Y, P) {
-    const { wMm: W, hMm: H, ww, wh, px, T } = Y;
+    const { wMm: W, hMm: H, ww, wh, px, T, rows } = Y;
     const ink = L.inkColor, lw = Math.max(1 / P, T * 0.016);
     ctx.strokeStyle = ink; ctx.fillStyle = ink; ctx.lineWidth = lw; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
     const wy = (H - wh) / 2;
-    ctx.lineWidth = Math.max(1 / P, T * 0.034);
-    [[T * 0.06, true], [W - T * 0.06 - ww, false]].forEach(([wx, flip]) => drawWing(ctx, wx, wy, ww, wh, flip));
-    ctx.lineWidth = lw;
+    [[T * 0.06, true], [W - T * 0.06 - ww, false]].forEach(([wx, flip]) => drawWing(ctx, wx, wy, ww, wh, flip, rows));
     ctx.fillStyle = ink;
     // 반짝이(+) · 하트
     const plus = (x, y, r) => { ctx.beginPath(); ctx.moveTo(x - r, y); ctx.lineTo(x + r, y); ctx.moveTo(x, y - r); ctx.lineTo(x, y + r); ctx.stroke(); };
